@@ -39,7 +39,7 @@ namespace OCL
             // segfaults when reading out an element of this type:
             //RTT::types::TypeInfoRepository::Instance()->addType( new types::SequenceTypeInfo<vector<bool> >("bools") );
 
-            RTT::types::TypeInfoRepository::Instance()->addType( new types::SequenceTypeInfo<vector<double> >("doubles") );
+//            RTT::types::TypeInfoRepository::Instance()->addType( new types::SequenceTypeInfo<vector<double> >("doubles") );
 
             RTT::types::TypeInfoRepository::Instance()->addType( new types::SequenceTypeInfo<vector<int> >("ints") );
 
