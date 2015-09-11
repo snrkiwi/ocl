@@ -1213,10 +1213,41 @@ namespace OCL
     {
         bool valid = true;
 
+        log(Info) << "Creating data port connections for " << conmap.size()
+                  << " connections"
+                  << (const char*)(skipUnconnected?" (skipping unconnected)":"")
+                  << endlog();
+
         for(ConMap::iterator it = conmap.begin(); it != conmap.end(); ++it) {
             ConnectionData *connection =  &(it->second);
-            std::string connection_name = it->first;
-            
+            const std::string connection_name = it->first;
+
+            // find all writers and all readers
+            vector<InputPortInterface*>   readers;
+            vector<OutputPortInterface*>  writers;
+            ConnectionData::Ports::iterator p = connection->ports.begin();
+            while (p !=connection->ports.end() ) {
+                if ( base::OutputPortInterface* out = dynamic_cast<base::OutputPortInterface*>( *p ) ) {
+                    writers.push_back( out );
+                }
+                else if ( base::InputPortInterface* in = dynamic_cast<base::InputPortInterface*>( *p ) ) {
+                    readers.push_back( in );
+                }
+                else
+                {
+                    assert(0 && "Found a port that isn't an Input nor an Output!");
+                }
+                ++p;
+            }
+
+            // inform reader of the situation
+            log(Info) << "- Examining topic '"<< connection_name << "' with "
+                      << connection->ports.size() << " ports ("
+                      << writers.size() << " Outputs and "
+                      << readers.size() << " Inputs)"
+                      << endlog();
+
+            // cope with only one port involved in the connection
             if ( connection->ports.size() == 1) {
                 string owner = connection->owners[0]->getName();
                 string portname = connection->ports.front()->getName();
@@ -1226,66 +1257,52 @@ namespace OCL
                 // two ports later on, so we skip this connection for now.
                 if (skipUnconnected)
                 {
-                    log(Info) << "Skipping connection with name "<<connection_name<<" with only one Port "<<portname<<" from "<< owner << endlog();
+                    log(Info) << "-- Skipping connection with name "<<connection_name<<" with only one Port "<<portname<<" from "<< owner << endlog();
                 }
                 else if ( connection->ports.front()->createStream( connection->policy ) == false) {
-                    log(Warning) << "Creating stream with name "<<connection_name<<" with Port "<<portname<<" from "<< owner << " failed."<< endlog();
+                    log(Warning) << "-- Creating stream with name "<<connection_name<<" with Port "<<portname<<" from "<< owner << " failed."<< endlog();
                 } else {
-                    log(Info) << "Component "<< owner << "'s " + porttype<< " " + portname << " will stream to "<< connection->policy.name_id << endlog();
+                    log(Info) << "-- Component "<< owner << "'s " + porttype<< " " + portname << " will stream to "<< connection->policy.name_id << endlog();
                 }
                 continue;
             }
-            // first find all write ports.
-            base::PortInterface* writer = 0;
-            ConnectionData::Ports::iterator p = connection->ports.begin();
-            
-            // If one of the ports is connected, use that one as writer to connect to.
-            vector<OutputPortInterface*> writers;
-            while (p !=connection->ports.end() ) {
-                if ( OutputPortInterface* out = dynamic_cast<base::OutputPortInterface*>( *p ) ) {
-                    if ( writer ) {
-                        log(Info) << "Forming multi-output connections with additional OutputPort " << (*p)->getName() << "."<<endlog();
-                    } else
-                    writer = *p;
-                    writers.push_back( out );
-                    std::string owner = it->second.owners[p - it->second.ports.begin()]->getName();
-                    log(Info) << "Component "<< owner << "'s OutputPort "<< writer->getName()<< " will write topic "<<it->first<< endlog();
-                }
-                ++p;
-            }
-            
-            // Inform the user of non-optimal connections:
-            if ( writer == 0 ) {
-                log(Error) << "No OutputPort listed that writes " << it->first << endlog();
+
+            // can't make any connections if only have readers!
+            if ( writers.size() == 0 ) {
+                log(Error) << "No OutputPort listed that writes " << connection_name << endlog();
                 valid = false;
                 break;
             }
-            
-            // connect all ports to writer
-            p = connection->ports.begin();
+
+            // for each writer, connect all readers to that writer
             vector<OutputPortInterface*>::iterator w = writers.begin();
-            
             while (w != writers.end() ) {
-                while (p != connection->ports.end() ) {
-                    // connect all readers to the list of writers
-                    if ( dynamic_cast<base::InputPortInterface*>( *p ) )
-                    {
-                        string owner = connection->owners[p - connection->ports.begin()]->getName();
-                        // only try to connect p if it is not in the same connection of writer.
-                        // OK. p is definately no part of writer's connection. Try to connect and flag errors if it fails.
-                        if ( (*w)->connectTo( *p, connection->policy ) == false) {
-                            log(Error) << "Could not subscribe InputPort "<< owner<<"."<< (*p)->getName() << " to topic " << (*w)->getName() <<'/'<< connection_name <<endlog();
-                            valid = false;
-                        } else {
-                            log(Info) << "Subscribed InputPort "<< owner<<"."<< (*p)->getName() <<" to topic " << (*w)->getName() <<'/'<< connection_name <<endlog();
-                        }
+                // find the writer in connections, so that can get it's associated name
+                const ConnectionData::Ports::iterator x = std::find(connection->ports.begin(), connection->ports.end(), *w);
+                assert(x);
+                const std::string writerOwner = connection->owners[x - connection->ports.begin()]->getName();
+                log(Info) << "-- Will connect OutputPort "<< writerOwner << "." << (*w)->getName()
+                          << " to the following inputs ... "<< endlog();
+
+                // for all ports that are readers (can't use "readers" here if want access into owners[N])
+                vector<InputPortInterface*>::iterator r = readers.begin();
+                while (r != readers.end() ) {
+                    // find the reader in connections, so that can get it's associated name
+                    const ConnectionData::Ports::iterator y = std::find(connection->ports.begin(), connection->ports.end(), *r);
+                    assert(y);
+                    const std::string readerOwner = connection->owners[y - connection->ports.begin()]->getName();
+
+                    log(Info) << "--- Subscribing InputPort "<< readerOwner<<"."<< (*r)->getName() <<endlog();
+                    if ( (*w)->connectTo( *r, connection->policy ) == false) {
+                        log(Error) << "Could not subscribe InputPort "<< readerOwner<<"."<< (*r)->getName() << " to topic " << (*w)->getName() <<'/'<< connection_name <<endlog();
+                        valid = false;
                     }
-                    ++p;
+                    ++r;
                 }
                 ++w;
-                p = connection->ports.begin();
             }
         }
+        log(Info) << "Finished creating data port connections : "<< (const char*)(valid?"success":"FAILED!") << endlog();
         return valid;
     }
     
