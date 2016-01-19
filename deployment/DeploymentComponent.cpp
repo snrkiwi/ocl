@@ -1294,7 +1294,12 @@ namespace OCL
         for(ConMap::iterator it = conmap.begin(); it != conmap.end(); ++it) {
             ConnectionData *connection =  &(it->second);
             std::string connection_name = it->first;
-            
+
+            // Set the connection name as default name_id if none was given explicitly
+            if (connection->policy.name_id.empty()) {
+                connection->policy.name_id = connection_name;
+            }
+
             if ( connection->ports.size() == 1) {
                 string owner = connection->owners[0]->getName();
                 string portname = connection->ports.front()->getName();
