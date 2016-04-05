@@ -217,7 +217,6 @@ int main(int argc, char** argv)
                 }
                 rc = (result ? 0 : -1);
 
-#ifdef USE_TASKBROWSER
                 // We don't start an interactive console when we're a daemon
                 if ( !deploymentOnlyChecked && !vm.count("daemon") ) {
                     if (isatty(fileno(stdin))) {
@@ -231,7 +230,6 @@ int main(int argc, char** argv)
                      dc.shutdownDeployment();
                 }
             }
-#endif
 
             TaskContextServer::ShutdownOrb();
 
