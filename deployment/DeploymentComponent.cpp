@@ -95,6 +95,7 @@ namespace OCL
 
     DeploymentComponent::DeploymentComponent(std::string name, std::string siteFile)
         : RTT::TaskContext(name, Stopped),
+          defaultWaitPeriodPolicy(ORO_WAIT_ABS),
           autoUnload("AutoUnload",
                      "Stop, cleanup and unload all components loaded by the DeploymentComponent when it is destroyed.",
                      true),
@@ -108,6 +109,7 @@ namespace OCL
           nextGroup(0)
     {
         this->addProperty( "RTT_COMPONENT_PATH", compPath ).doc("Locations to look for components. Use a colon or semi-colon separated list of paths. Defaults to the environment variable with the same name.");
+        this->addProperty( "DefaultWaitPeriodPolicy", defaultWaitPeriodPolicy ).doc("The default value for the wait period policy property for threads of newly created activities (ORO_WAIT_ABS or ORO_WAIT_REL).");
         this->addProperty( autoUnload );
         this->addAttribute( target );
 
@@ -207,6 +209,8 @@ namespace OCL
 			.arg("Priority", "The priority of the activity.")
 			.arg("SchedType", "The scheduler type of the activity.");
 
+        this->addOperation("setWaitPeriodPolicy", &DeploymentComponent::setWaitPeriodPolicy, this, ClientThread).doc("Sets the wait period policy of an existing component thread.").arg("CompName", "The name of the Component.").arg("Policy", "The new policy (ORO_WAIT_ABS or ORO_WAIT_REL).");
+
         valid_names.insert("AutoUnload");
         valid_names.insert("UseNamingService");
         valid_names.insert("Server");
@@ -283,42 +287,62 @@ namespace OCL
     }
 
     bool DeploymentComponent::waitForInterrupt() {
-    	if ( !waitForSignal(SIGINT) )
+        int sigs[] = { SIGINT, SIGTERM, SIGHUP };
+        if ( !waitForSignals(sigs, 3) )
     		return false;
     	cout << "DeploymentComponent: Got interrupt !" <<endl;
     	return true;
     }
 
     bool DeploymentComponent::waitForSignal(int sig) {
+        return waitForSignals(&sig, 1);
+    }
+
+    bool DeploymentComponent::waitForSignals(int *sigs, std::size_t sig_count) {
 #ifdef USE_SIGNALS
-    	struct sigaction sa, sold;
-    	sa.sa_handler = ctrl_c_catcher;
-    	if ( ::sigaction(sig, &sa, &sold) != 0) {
-    		cout << "DeploymentComponent: Failed to install signal handler for signal " << sig << endl;
-    		return false;
-    	}
-    	while (got_signal != sig) {
-    		TIME_SPEC ts;
-    		ts.tv_sec = 1;
-    		ts.tv_nsec = 0;
-    		rtos_nanosleep(&ts, 0);
-    	}
-    	got_signal = -1;
-    	// reinstall previous handler if present.
-    	if (sold.sa_handler || sold.sa_sigaction)
-    		::sigaction(sig, &sold, NULL);
-    	return true;
+        struct sigaction sa, sold[sig_count];
+        std::size_t index = 0;
+        sa.sa_handler = ctrl_c_catcher;
+        for( ; index < sig_count; ++index) {
+            if ( ::sigaction(sigs[index], &sa, &sold[index]) != 0) {
+                cout << "DeploymentComponent: Failed to install signal handler for signal " << sigs[index] << endl;
+                break;
+            }
+        }
+
+        if (index == sig_count) {
+            bool break_loop = false;
+            while(!break_loop) {
+                for(std::size_t check = 0; check < sig_count; ++check) {
+                    if (got_signal == sigs[check]) break_loop = true;
+                }
+                TIME_SPEC ts;
+                ts.tv_sec = 1;
+                ts.tv_nsec = 0;
+                rtos_nanosleep(&ts, 0);
+            }
+        }
+        got_signal = -1;
+
+        // reinstall previous handlers if present.
+        while(index > 0) {
+            index--;
+            if (sold[index].sa_handler || sold[index].sa_sigaction) {
+                ::sigaction(sigs[index], &sold[index], NULL);
+            }
+        }
+        return true;
 #else
-		cout << "DeploymentComponent: Failed to install signal handler for signal " << sig << ": Not supported by this Operating System. "<<endl;
-		return false;
+        cout << "DeploymentComponent: Failed to install signal handler for signal " << sig << ": Not supported by this Operating System. "<<endl;
+        return false;
 #endif
     }
 
     bool DeploymentComponent::connectPeers(const std::string& one, const std::string& other)
     {
         RTT::Logger::In in("connectPeers");
-        RTT::TaskContext* t1 = one == this->getName() ? this : this->getPeer(one);
-        RTT::TaskContext* t2 = other == this->getName() ? this : this->getPeer(other);
+        RTT::TaskContext* t1 = (((one == this->getName()) || (one == "this")) ? this : this->getPeer(one));
+        RTT::TaskContext* t2 = (((other == this->getName()) || (other == "this")) ? this : this->getPeer(other));
         if (!t1) {
             log(Error)<< "No such peer: "<<one<<endlog();
             return false;
@@ -333,8 +357,8 @@ namespace OCL
     bool DeploymentComponent::addPeer(const std::string& from, const std::string& to)
     {
         RTT::Logger::In in("addPeer");
-        RTT::TaskContext* t1 = from == this->getName() ? this : this->getPeer(from);
-        RTT::TaskContext* t2 = to == this->getName() ? this : this->getPeer(to);
+        RTT::TaskContext* t1 = (((from == this->getName()) || (from == "this")) ? this : this->getPeer(from));
+        RTT::TaskContext* t2 = (((to == this->getName()) || (to == "this")) ? this : this->getPeer(to));
         if (!t1) {
             log(Error)<< "No such peer: "<<from<<endlog();
             return false;
@@ -343,18 +367,18 @@ namespace OCL
             log(Error)<< "No such peer: "<<to<<endlog();
             return false;
         }
-        if ( t1->hasPeer(t2->getName()) ) {
+        if ( t1->hasPeer(to) ) {
             log(Info) << "addPeer: "<< to << " is already a peer of " << from << endlog();
             return true;
         }
-        return t1->addPeer(t2);
+        return t1->addPeer(t2,to);
     }
 
     bool DeploymentComponent::aliasPeer(const std::string& from, const std::string& to, const std::string& alias)
     {
         RTT::Logger::In in("addPeer");
-        RTT::TaskContext* t1 = from == this->getName() ? this : this->getPeer(from);
-        RTT::TaskContext* t2 = to == this->getName() ? this : this->getPeer(to);
+        RTT::TaskContext* t1 = (((from == this->getName()) || (from == "this")) ? this : this->getPeer(from));
+        RTT::TaskContext* t2 = (((to == this->getName()) || (to == "this")) ? this : this->getPeer(to));
         if (!t1) {
             log(Error)<< "No such peer known to deployer '"<< this->getName()<< "': "<<from<<endlog();
             return false;
@@ -374,14 +398,16 @@ namespace OCL
       if (strs.empty()) return Service::shared_ptr();
 
     	string component = strs.front();
-    	if (!hasPeer(component) && component != this->getName() ) {
-    		log(Error) << "No such component: '"<< component <<"'" <<endlog();
+        RTT::TaskContext *tc = (((component == this->getName()) || (component == "this")) ? this : getPeer(component));
+        if (!tc) {
+            log(Error) << "No such component: '"<< component << "'";
     		if ( names.find('.') != string::npos )
-    			log(Error)<< " when looking for service '" << names <<"'" <<endlog();
+                log(Error) << " when looking for service '" << names <<" '";
+            log() << endlog();
     		return Service::shared_ptr();
     	}
     	// component is peer or self:
-    	Service::shared_ptr ret = (component != this->getName() ? getPeer(component)->provides() : this->provides());
+        Service::shared_ptr ret = tc->provides();
 
     	// remove component name:
     	strs.erase( strs.begin() );
@@ -403,14 +429,15 @@ namespace OCL
         boost::split(strs, names, boost::is_any_of("."));
 
         string component = strs.front();
-        if (!hasPeer(component) && component != this->getName() ) {
+        RTT::TaskContext *tc = (((component == this->getName()) || (component == "this")) ? this : getPeer(component));
+        if (!tc) {
             log(Error) << "No such component: '"<< component <<"'" <<endlog();
             if ( names.find('.') != string::npos )
                 log(Error)<< " when looking for service '" << names <<"'" <<endlog();
             return ServiceRequester::shared_ptr();
         }
         // component is peer or self:
-        ServiceRequester::shared_ptr ret = (component != this->getName() ? getPeer(component)->requires() : this->requires());
+        ServiceRequester::shared_ptr ret = tc->requires();
 
         // remove component name:
         strs.erase( strs.begin() );
@@ -435,13 +462,14 @@ namespace OCL
       if (strs.empty()) return 0;
 
     	string component = strs.front();
-    	if (!hasPeer(component) && component != this->getName() ) {
+        RTT::TaskContext *tc = (((component == this->getName()) || (component == "this")) ? this : getPeer(component));
+        if (!tc) {
     		log(Error) << "No such component: '"<< component <<"'" ;
     		log(Error)<< " when looking for port '" << names <<"'" <<endlog();
     		return 0;
     	}
     	// component is peer or self:
-    	Service::shared_ptr serv = (component != this->getName() ? getPeer(component)->provides() : this->provides());
+        Service::shared_ptr serv = tc->provides();
     	base::PortInterface* ret = 0;
 
     	// remove component name:
@@ -647,6 +675,30 @@ namespace OCL
 
     bool DeploymentComponent::runScript(const std::string& file_name)
     {
+#ifdef BUILD_LUA_RTT
+        if (file_name.rfind(".lua") == file_name.length() - 4) {
+            if (!this->provides()->hasService("Lua")) {
+                // Load lua scripting service
+                if(!RTT::plugin::PluginLoader::Instance()->loadService("Lua", this)) {
+                  RTT::log(RTT::Error) << "Could not load lua service." << RTT::endlog();
+                  return false;
+                }
+
+                // Get exec_str operation
+                RTT::OperationCaller<bool(std::string)> exec_str =
+                    this->provides("Lua")->getOperation("exec_str");
+
+                // Load rttlib for first-class operation support
+                exec_str("require(\"rttlib\")");
+            }
+
+            // Get exec_file operation
+            RTT::OperationCaller<bool(std::string)> exec_file =
+                this->provides("Lua")->getOperation("exec_file");
+
+            return exec_file( file_name );
+        }
+#endif
         return this->getProvider<Scripting>("scripting")->runScript( file_name );
     }
 
@@ -857,7 +909,20 @@ namespace OCL
                         assert( cp_prop.ready() );
                         if ( cp_prop.compose( comp ) ) {
                             //It's a connection policy.
-                            conmap[cp_prop.getName()].policy = cp_prop.get();
+#if defined(RTT_VERSION_GTE)
+#if RTT_VERSION_GTE(2,8,99)
+                            // Set default ConnPolicy
+                            if (cp_prop.getName() == "Default") {
+                                RTT::ConnPolicy::Default() = cp_prop.get();
+                            } else {
+#endif
+#endif
+                                conmap[cp_prop.getName()].policy = cp_prop.get();
+#if defined(RTT_VERSION_GTE)
+#if RTT_VERSION_GTE(2,8,99)
+                            }
+#endif
+#endif
                             log(Debug) << "Saw connection policy " << (*it)->getName() << endlog();
                             continue;
                         }
@@ -875,7 +940,7 @@ namespace OCL
                                     log(Error) << "AutoConnect must be of type <boolean>" << endlog();
                                     valid = false;
                                 } else
-                                    comps[comp.getName()].autoconnect = ps.get();
+                                    compmap[comp.getName()].autoconnect = ps.get();
                                 continue;
                             }
                             if ( (*optit)->getName() == "AutoStart" ) {
@@ -884,7 +949,7 @@ namespace OCL
                                     log(Error) << "AutoStart must be of type <boolean>" << endlog();
                                     valid = false;
                                 } else
-                                    comps[comp.getName()].autostart = ps.get();
+                                    compmap[comp.getName()].autostart = ps.get();
                                 continue;
                             }
                             if ( (*optit)->getName() == "AutoSave" ) {
@@ -893,7 +958,7 @@ namespace OCL
                                     log(Error) << "AutoSave must be of type <boolean>" << endlog();
                                     valid = false;
                                 } else
-                                    comps[comp.getName()].autosave = ps.get();
+                                    compmap[comp.getName()].autosave = ps.get();
                                 continue;
                             }
                             if ( (*optit)->getName() == "AutoConf" ) {
@@ -902,7 +967,7 @@ namespace OCL
                                     log(Error) << "AutoConf must be of type <boolean>" << endlog();
                                     valid = false;
                                 } else
-                                    comps[comp.getName()].autoconf = ps.get();
+                                    compmap[comp.getName()].autoconf = ps.get();
                                 continue;
                             }
                             if ( (*optit)->getName() == "Server" ) {
@@ -911,7 +976,7 @@ namespace OCL
                                     log(Error) << "Server must be of type <boolean>" << endlog();
                                     valid = false;
                                 } else
-                                    comps[comp.getName()].server = ps.get();
+                                    compmap[comp.getName()].server = ps.get();
                                 continue;
                             }
                             if ( (*optit)->getName() == "Service" || (*optit)->getName() == "Plugin"  || (*optit)->getName() == "Provides") {
@@ -920,7 +985,7 @@ namespace OCL
                                     log(Error) << (*optit)->getName() << " must be of type <string>" << endlog();
                                     valid = false;
                                 } else {
-                                    comps[comp.getName()].plugins.push_back(ps.value());
+                                    compmap[comp.getName()].plugins.push_back(ps.value());
                                 }
                                 continue;
                             }
@@ -930,7 +995,7 @@ namespace OCL
                                     log(Error) << "UseNamingService must be of type <boolean>" << endlog();
                                     valid = false;
                                 } else
-                                    comps[comp.getName()].use_naming = ps.get();
+                                    compmap[comp.getName()].use_naming = ps.get();
                                 continue;
                             }
                             if ( (*optit)->getName() == "PropertyFile" ) {
@@ -939,7 +1004,7 @@ namespace OCL
                                     log(Error) << "PropertyFile must be of type <string>" << endlog();
                                     valid = false;
                                 } else
-                                    comps[comp.getName()].configfile = ps.get();
+                                    compmap[comp.getName()].configfile = ps.get();
                                 continue;
                             }
                             if ( (*optit)->getName() == "UpdateProperties" ) {
@@ -948,7 +1013,7 @@ namespace OCL
                                     log(Error) << "UpdateProperties must be of type <string>" << endlog();
                                     valid = false;
                                 } else
-                                    comps[comp.getName()].configfile = ps.get();
+                                    compmap[comp.getName()].configfile = ps.get();
                                 continue;
                             }
                             if ( (*optit)->getName() == "LoadProperties" ) {
@@ -957,7 +1022,7 @@ namespace OCL
                                     log(Error) << "LoadProperties must be of type <string>" << endlog();
                                     valid = false;
                                 } else
-                                    comps[comp.getName()].configfile = ps.get();
+                                    compmap[comp.getName()].configfile = ps.get();
                                 continue;
                             }
                             if ( (*optit)->getName() == "Properties" ) {
@@ -1007,16 +1072,16 @@ namespace OCL
                                 valid = false;
                                 continue;
                             }
-                            c = comps[(*it)->getName()].instance;
+                            c = compmap[(*it)->getName()].instance;
                         } else {
                             // If the user added c as a peer (outside of Deployer) store the pointer
-                            comps[(*it)->getName()].instance = c;
+                            compmap[(*it)->getName()].instance = c;
                         }
 
                         assert(c);
 
                         // load plugins/services:
-                        vector<string>& services = comps[(*it)->getName()].plugins;
+                        vector<string>& services = compmap[(*it)->getName()].plugins;
                         for (vector<string>::iterator svit = services.begin(); svit != services.end(); ++svit) {
                             if ( c->provides()->hasService( *svit ) == false) {
                                 PluginLoader::Instance()->loadService(*svit, c);
@@ -1189,7 +1254,7 @@ namespace OCL
                         else
                         {
                             log(Info) << "Added component " << (*it)->getName() << " to group " << group << endlog();
-                            comps[(*it)->getName()].group = group;
+                            compmap[(*it)->getName()].group = group;
                         }
                     }
 
@@ -1216,8 +1281,13 @@ namespace OCL
         for(ConMap::iterator it = conmap.begin(); it != conmap.end(); ++it) {
             ConnectionData *connection =  &(it->second);
             std::string connection_name = it->first;
-            
-            if ( connection->ports.size() == 1) {
+
+            // Set the connection name as default name_id if none was given explicitly
+            if (connection->policy.name_id.empty()) {
+                connection->policy.name_id = connection_name;
+            }
+
+            if ( connection->ports.size() == 1 ){
                 string owner = connection->owners[0]->getName();
                 string portname = connection->ports.front()->getName();
                 string porttype = dynamic_cast<InputPortInterface*>(connection->ports.front() ) ? "InputPort" : "OutputPort";
@@ -1226,7 +1296,7 @@ namespace OCL
                 // two ports later on, so we skip this connection for now.
                 if (skipUnconnected)
                 {
-                    log(Info) << "Skipping connection with name "<<connection_name<<" with only one Port "<<portname<<" from "<< owner << endlog();
+                    log(Info) << "Skipping connection with name " << connection_name << " with only one Port " << portname << " from " << owner << endlog();
                 }
                 else if ( connection->ports.front()->createStream( connection->policy ) == false) {
                     log(Warning) << "Creating stream with name "<<connection_name<<" with Port "<<portname<<" from "<< owner << " failed."<< endlog();
@@ -1238,7 +1308,7 @@ namespace OCL
             // first find all write ports.
             base::PortInterface* writer = 0;
             ConnectionData::Ports::iterator p = connection->ports.begin();
-            
+
             // If one of the ports is connected, use that one as writer to connect to.
             vector<OutputPortInterface*> writers;
             while (p !=connection->ports.end() ) {
@@ -1246,25 +1316,25 @@ namespace OCL
                     if ( writer ) {
                         log(Info) << "Forming multi-output connections with additional OutputPort " << (*p)->getName() << "."<<endlog();
                     } else
-                    writer = *p;
+                        writer = *p;
                     writers.push_back( out );
                     std::string owner = it->second.owners[p - it->second.ports.begin()]->getName();
                     log(Info) << "Component "<< owner << "'s OutputPort "<< writer->getName()<< " will write topic "<<it->first<< endlog();
                 }
                 ++p;
             }
-            
+
             // Inform the user of non-optimal connections:
             if ( writer == 0 ) {
                 log(Error) << "No OutputPort listed that writes " << it->first << endlog();
                 valid = false;
                 break;
             }
-            
+
             // connect all ports to writer
             p = connection->ports.begin();
             vector<OutputPortInterface*>::iterator w = writers.begin();
-            
+
             while (w != writers.end() ) {
                 while (p != connection->ports.end() ) {
                     // connect all readers to the list of writers
@@ -1294,7 +1364,7 @@ namespace OCL
         RTT::Logger::In in("configureComponents");
         // do all groups
         bool valid = true;
-        for (int group = nextGroup - 1; group > 0; --group) {
+        for (int group = 0; group <= nextGroup; ++group) {
             valid &= configureComponentsGroup(group);
         }
         return valid;
@@ -1318,18 +1388,18 @@ namespace OCL
             RTT::Property<RTT::PropertyBag> comp = *it;
 
             // only components in this group
-            if (group != comps[ comp.getName() ].group) {
+            if (group != compmap[comp.getName()].group) {
                 continue;
             }
 
-            RTT::TaskContext* peer = comps[ comp.getName() ].instance;
+            RTT::TaskContext* peer = compmap[comp.getName()].instance;
             if ( !peer ) {
                 log(Error) << "Peer not found: "<< comp.getName() <<endlog();
                 valid=false;
                 continue;
             }
 
-            comps[comp.getName()].instance = peer;
+            compmap[comp.getName()].instance = peer;
 
             // Setup the connections from each component to the
             // others.
@@ -1339,13 +1409,13 @@ namespace OCL
                     RTT::Property<string> nm = (*it);
                     if ( nm.ready() )
                         {
-                            if ( this->addPeer( comps[comp.getName()].instance->getName(), nm.value() ) == false ) {
+                            if ( this->addPeer( compmap[comp.getName()].instance->getName(), nm.value() ) == false ) {
                                 log(Error) << this->getName() << " can't make " << nm.value() << " a peer of " <<
-                                    comps[comp.getName()].instance->getName() << endlog();
+                                    compmap[comp.getName()].instance->getName() << endlog();
                                 valid = false;
                             } else {
                                 log(Info) << this->getName() << " makes " << nm.value() << " a peer of " <<
-                                    comps[comp.getName()].instance->getName() << endlog();
+                                    compmap[comp.getName()].instance->getName() << endlog();
                             }
                         }
                     else {
@@ -1366,20 +1436,20 @@ namespace OCL
                 continue;
 
             // only components in this group
-            if (group != comps[ comp.getName() ].group) {
+            if (group != compmap[ comp.getName() ].group) {
                 continue;
             }
 
-            RTT::TaskContext* peer = comps[ comp.getName() ].instance;
+            RTT::TaskContext* peer = compmap[ comp.getName() ].instance;
 
             // only autoconnect if AutoConnect == 1 and peer has AutoConnect == 1
             // There should only be one writer; more than one will lead to undefined behaviour.
             // reader<->reader connections will silently fail and be retried once a writer is found.
-            if ( comps[comp.getName()].autoconnect ) {
+            if ( compmap[comp.getName()].autoconnect ) {
                 // XXX/TODO This is broken: we should not rely on the peers to implement AutoConnect!
                 RTT::TaskContext::PeerList peers = peer->getPeerList();
                 for(RTT::TaskContext::PeerList::iterator pit = peers.begin(); pit != peers.end(); ++pit) {
-                    if ( comps.count( *pit ) && comps[ *pit ].autoconnect ) {
+                    if ( compmap.count( *pit ) && compmap[*pit].autoconnect ) {
                         RTT::TaskContext* other = peer->getPeer( *pit );
                         valid = RTT::connectPorts( peer, other ) && valid;
                     }
@@ -1393,12 +1463,12 @@ namespace OCL
             RTT::Property<RTT::PropertyBag> comp = *it;
 
             // only components in this group
-            if (group != comps[ comp.getName() ].group) {
+            if (group != compmap[ comp.getName() ].group) {
                 continue;
             }
 
             RTT::Property<string> dummy;
-            RTT::TaskContext* peer = comps[ comp.getName() ].instance;
+            RTT::TaskContext* peer = compmap[ comp.getName() ].instance;
 
             // do not configure when not stopped.
             if ( peer->getTaskState() > Stopped) {
@@ -1439,24 +1509,24 @@ namespace OCL
                         valid = false;
                     } else {
                         log(Info) << "Configured Properties of "<< comp.getName() << " from "<<filename<<endlog();
-                        comps[ comp.getName() ].loadedProperties = true;
+                        compmap[ comp.getName() ].loadedProperties = true;
                     }
                 }
             }
 
             // Attach activities
-            if ( comps[comp.getName()].act ) {
+            if ( compmap[comp.getName()].act ) {
                 if ( peer->getActivity() ) {
                     log(Info) << "Re-setting activity of "<< comp.getName() <<endlog();
                 } else {
                     log(Info) << "Setting activity of "<< comp.getName() <<endlog();
                 }
-                if (peer->setActivity( comps[comp.getName()].act ) == false ) {
+                if (peer->setActivity( compmap[comp.getName()].act ) == false ) {
                     valid = false;
                     log(Error) << "Failed to set Activity of " << comp.getName() << endlog();
                 } else {
-                    assert( peer->engine()->getActivity() == comps[comp.getName()].act );
-                    comps[comp.getName()].act = 0; // drops ownership.
+                    assert( peer->engine()->getActivity() == compmap[comp.getName()].act );
+                    compmap[comp.getName()].act = 0; // drops ownership.
                 }
             }
 
@@ -1484,7 +1554,7 @@ namespace OCL
             }
 
             // AutoConf
-            if (comps[comp.getName()].autoconf )
+            if (compmap[comp.getName()].autoconf )
                 {
                     if( !peer->isRunning() )
                         {
@@ -1510,7 +1580,7 @@ namespace OCL
         // they will have been configured/started previously)
         if (!valid) {
             for ( CompList::iterator cit = comps.begin(); cit != comps.end(); ++cit) {
-                ComponentData* cd = &(cit->second);
+                ComponentData* cd = &(compmap[*cit]);
                 if ( group == cd->group && cd->loaded && cd->autoconf &&
                      (cd->instance->getTaskState() != TaskCore::Stopped) &&
                      (cd->instance->getTaskState() != TaskCore::Running))
@@ -1529,7 +1599,7 @@ namespace OCL
     {
         // do all groups
         bool valid = true;
-        for (int group = nextGroup - 1; group > 0; --group) {
+        for (int group = 0; group <= nextGroup; ++group) {
             valid &= startComponentsGroup(group);
         }
         return valid;
@@ -1546,11 +1616,11 @@ namespace OCL
         for (RTT::PropertyBag::iterator it= root.begin(); it!=root.end();it++) {
 
             // only components in this group
-            if (group != comps[ (*it)->getName() ].group) {
+            if (group != compmap[(*it)->getName()].group) {
                 continue;
             }
 
-            TaskContext* peer = comps[ (*it)->getName() ].instance;
+            TaskContext* peer = compmap[(*it)->getName()].instance;
 
             // only start if not already running (peer may have been previously
             // loaded/configured/started from the site deployer file)
@@ -1561,14 +1631,14 @@ namespace OCL
 
             // AutoStart
 	    OperationCaller<bool(void)> peerstart = peer->getOperation("start");
-            if (comps[(*it)->getName()].autostart )
+            if (compmap[(*it)->getName()].autostart )
                 if ( !peer || ( !peer->isRunning() && peerstart() == false) )
                     valid = false;
         }
         // Finally, report success/failure:
         if (!valid) {
             for ( CompList::iterator cit = comps.begin(); cit != comps.end(); ++cit) {
-                ComponentData* it = &(cit->second);
+                ComponentData* it = &(compmap[*cit]);
 
                 // only components in this group
                 if (group != it->group) {
@@ -1576,7 +1646,7 @@ namespace OCL
                 }
 
                 if ( it->instance == 0 ) {
-                    log(Error) << "Failed to start component "<< cit->first << ": not found." << endlog();
+                    log(Error) << "Failed to start component "<< *cit << ": not found." << endlog();
                     continue;
                 }
                 if ( it->autostart && it->instance->getTaskState() != base::TaskCore::Running )
@@ -1604,8 +1674,8 @@ namespace OCL
         log(Info) << "Stopping group " << group << endlog();
         bool valid = true;
         // 1. Stop all activities, give components chance to cleanup.
-        for ( CompList::iterator cit = comps.begin(); cit != comps.end(); ++cit) {
-            ComponentData* it = &(cit->second);
+        for ( CompList::reverse_iterator cit = comps.rbegin(); cit != comps.rend(); ++cit) {
+            ComponentData* it = &(compmap[*cit]);
             if ( (group == it->group) && it->instance && !it->proxy ) {
                 OperationCaller<bool(void)> instancestop = it->instance->getOperation("stop");
                 if ( !it->instance->isRunning() ||
@@ -1636,8 +1706,8 @@ namespace OCL
         bool valid = true;
         log(Info) << "Cleaning up group " << group << endlog();
         // 1. Cleanup all activities, give components chance to cleanup.
-        for ( CompList::iterator cit = comps.begin(); cit != comps.end(); ++cit) {
-            ComponentData* it = &(cit->second);
+        for ( CompList::reverse_iterator cit = comps.rbegin(); cit != comps.rend(); ++cit) {
+            ComponentData* it = &(compmap[*cit]);
 
             // only components in this group
             if (group != it->group) {
@@ -1690,16 +1760,16 @@ namespace OCL
         log(Info) << "Unloading group " << group << endlog();
         // 2. Disconnect and destroy all components in group
         bool valid = true;
-        CompList::iterator cit = comps.begin();
-        while ( valid && cit != comps.end())
+        CompList::reverse_iterator cit = comps.rbegin();
+        while ( valid && cit != comps.rend())
             {
-                ComponentData* it = &(cit->second);
+                ComponentData* it = &(compmap[*cit]);
                 if (group == it->group)
                 {
                     // this call modifies comps
-                    valid &= this->unloadComponentImpl(cit);
+                    valid &= this->unloadComponentImpl(compmap.find(*cit));
                     // so restart search
-                    cit = comps.begin();
+                    cit = comps.rbegin();
                 }
                 else
                 {
@@ -1745,7 +1815,7 @@ namespace OCL
 
     bool DeploymentComponent::loadService(const std::string& name, const std::string& type) {
         TaskContext* peer = 0;
-        if (name == getName() )
+        if ((name == getName()) || (name == "this"))
             peer = this;
         else if ( (peer = getPeer(name)) == 0) {
             log(Error)<<"No such peer: "<< name<< ". Can not load service '"<<type<<"'."<<endlog();
@@ -1766,7 +1836,7 @@ namespace OCL
         if ( type == "RTT::PropertyBag" )
             return false; // It should be present as peer.
 
-        if ( this->getPeer(name) || ( comps.find(name) != comps.end() && comps[name].instance != 0) ) {
+        if ( this->getPeer(name) || ( compmap.find(name) != compmap.end() && compmap[name].instance != 0) ) {
             log(Error) <<"Failed to load component with name "<<name<<": already present as peer or loaded."<<endlog();
             return false;
         }
@@ -1778,20 +1848,21 @@ namespace OCL
         }
 
         // we need to set instance such that componentLoaded can lookup 'instance' in 'comps'
-        comps[name].instance = instance;
+        compmap[name].instance = instance;
+        comps.push_back(name);
 
         if (!this->componentLoaded( instance ) ) {
             log(Error) << "This deployer type refused to connect to "<< instance->getName() << ": aborting !" << endlog(Error);
-            comps[name].instance = 0;
+            compmap[name].instance = 0;
             ComponentLoader::Instance()->unloadComponent( instance );
             return false;
         }
 
         // unlikely that this fails (checked at entry)!
-        this->addPeer( instance );
-        log(Info) << "Adding "<< instance->getName() << " as new peer:  OK."<< endlog(Info);
+        this->addPeer( instance, name );
+        log(Info) << "Adding "<< name << " as new peer:  OK."<< endlog(Info);
 
-        comps[name].loaded = true;
+        compmap[name].loaded = true;
 
         return true;
     }
@@ -1800,7 +1871,7 @@ namespace OCL
      * This method removes all references to the component hold in \a cit,
      * on the condition that it is not running.
      */
-    bool DeploymentComponent::unloadComponentImpl( CompList::iterator cit )
+    bool DeploymentComponent::unloadComponentImpl( CompMap::iterator cit )
     {
         bool valid = true;
         ComponentData* it = &(cit->second);
@@ -1838,7 +1909,7 @@ namespace OCL
                 // Finally, delete the activity before the TC !
                 delete it->act;
                 it->act = 0;
-                ComponentLoader::Instance()->unloadComponent( it->instance );
+                ComponentLoader::Instance()->unloadComponent( it->instance, name );
                 it->instance = 0;
                 log(Info) << "Disconnected and destroyed "<< name <<endlog();
             } else {
@@ -1849,22 +1920,29 @@ namespace OCL
         if (valid) {
             // NOTE there is no reason to keep the ComponentData in the vector.
             // actually it may cause errors if we try to re-load the Component later.
-            comps.erase(cit);
+            compmap.erase(cit);
+            CompList::iterator it = comps.begin();
+            while(it != comps.end()) {
+                if (*it == name)
+                    it = comps.erase(it);
+                else
+                    ++it;
+            }
         }
         return valid;
     }
 
     bool DeploymentComponent::unloadComponent(const std::string& name)
     {
-        CompList::iterator it;
+        CompMap::iterator it;
             // no such peer: try looking for the map name
-            if ( comps.count( name ) == 0 || comps[name].loaded == false ) {
+            if ( compmap.count( name ) == 0 || compmap[name].loaded == false ) {
                 log(Error) << "Can't unload component '"<<name<<"': not loaded by "<<this->getName()<<endlog();
                 return false;
                 }
 
         // Ok. Go on with loaded component.
-        it = comps.find(name);
+        it = compmap.find(name);
 
         if ( this->unloadComponentImpl( it ) == false )
             return false;
@@ -1899,10 +1977,10 @@ namespace OCL
                                           int scheduler)
     {
         if ( this->setNamedActivity(comp_name, "Activity", period, priority, scheduler) ) {
-            assert( comps[comp_name].instance );
-            assert( comps[comp_name].act );
-            comps[comp_name].instance->setActivity( comps[comp_name].act );
-            comps[comp_name].act = 0;
+            assert( compmap[comp_name].instance );
+            assert( compmap[comp_name].act );
+            compmap[comp_name].instance->setActivity( compmap[comp_name].act );
+            compmap[comp_name].act = 0;
             return true;
         }
         return false;
@@ -1913,10 +1991,10 @@ namespace OCL
                                           int scheduler)
     {
         if ( this->setNamedActivity(comp_name, "FileDescriptorActivity", timeout, priority, scheduler) ) {
-            assert( comps[comp_name].instance );
-            assert( comps[comp_name].act );
-            comps[comp_name].instance->setActivity( comps[comp_name].act );
-            comps[comp_name].act = 0;
+            assert( compmap[comp_name].instance );
+            assert( compmap[comp_name].act );
+            compmap[comp_name].instance->setActivity( compmap[comp_name].act );
+            compmap[comp_name].act = 0;
             return true;
         }
         return false;
@@ -1928,10 +2006,10 @@ namespace OCL
     {
         unsigned int mask = 0x1 << cpu_nr;
         if ( this->setNamedActivity(comp_name, "Activity", period, priority, scheduler, mask) ) {
-            assert( comps[comp_name].instance );
-            assert( comps[comp_name].act );
-            comps[comp_name].instance->setActivity( comps[comp_name].act );
-            comps[comp_name].act = 0;
+            assert( compmap[comp_name].instance );
+            assert( compmap[comp_name].act );
+            compmap[comp_name].instance->setActivity( compmap[comp_name].act );
+            compmap[comp_name].act = 0;
             return true;
         }
         return false;
@@ -1942,10 +2020,10 @@ namespace OCL
                                                   int scheduler)
     {
         if ( this->setNamedActivity(comp_name, "PeriodicActivity", period, priority, scheduler) ) {
-            assert( comps[comp_name].instance );
-            assert( comps[comp_name].act );
-            comps[comp_name].instance->setActivity( comps[comp_name].act );
-            comps[comp_name].act = 0;
+            assert( compmap[comp_name].instance );
+            assert( compmap[comp_name].act );
+            compmap[comp_name].instance->setActivity( compmap[comp_name].act );
+            compmap[comp_name].act = 0;
             return true;
         }
         return false;
@@ -1955,10 +2033,10 @@ namespace OCL
                                                double period)
     {
         if ( this->setNamedActivity(comp_name, "SlaveActivity", period, 0, ORO_SCHED_OTHER ) ) {
-            assert( comps[comp_name].instance );
-            assert( comps[comp_name].act );
-            comps[comp_name].instance->setActivity( comps[comp_name].act );
-            comps[comp_name].act = 0;
+            assert( compmap[comp_name].instance );
+            assert( compmap[comp_name].act );
+            compmap[comp_name].instance->setActivity( compmap[comp_name].act );
+            compmap[comp_name].act = 0;
             return true;
         }
         return false;
@@ -1967,10 +2045,10 @@ namespace OCL
     bool DeploymentComponent::setSequentialActivity(const std::string& comp_name)
     {
         if ( this->setNamedActivity(comp_name, "SequentialActivity", 0, 0, 0 ) ) {
-            assert( comps[comp_name].instance );
-            assert( comps[comp_name].act );
-            comps[comp_name].instance->setActivity( comps[comp_name].act );
-            comps[comp_name].act = 0;
+            assert( compmap[comp_name].instance );
+            assert( compmap[comp_name].act );
+            compmap[comp_name].instance->setActivity( compmap[comp_name].act );
+            compmap[comp_name].act = 0;
             return true;
         }
         return false;
@@ -1980,10 +2058,10 @@ namespace OCL
                                                    const std::string& slave)
     {
         if ( this->setNamedActivity(slave, "SlaveActivity", 0, 0, ORO_SCHED_OTHER, master ) ) {
-            assert( comps[slave].instance );
-            assert( comps[slave].act );
-            comps[slave].instance->setActivity( comps[slave].act );
-            comps[slave].act = 0;
+            assert( compmap[slave].instance );
+            assert( compmap[slave].act );
+            compmap[slave].instance->setActivity( compmap[slave].act );
+            compmap[slave].act = 0;
             return true;
         }
         return false;
@@ -2011,16 +2089,16 @@ namespace OCL
                                                const std::string& master_name)
     {
         // This helper function does not actualy set the activity, it just creates it and
-        // stores it in comps[comp_name].act
+        // stores it in compmap[comp_name].act
         RTT::TaskContext* peer = 0;
         base::ActivityInterface* master_act = 0;
         if ( comp_name == this->getName() )
             peer = this;
         else
-            if ( comps.count(comp_name) )
-	        peer = comps[comp_name].instance;
+            if ( compmap.count(comp_name) )
+                peer = compmap[comp_name].instance;
             else
-	        peer = this->getPeer(comp_name); // last resort.
+                peer = this->getPeer(comp_name); // last resort.
         if (!peer) {
             log(Error) << "Can't create Activity: component "<<comp_name<<" not found."<<endlog();
             return false;
@@ -2029,8 +2107,8 @@ namespace OCL
             if ( master_name == this->getName() )
 	        master_act = this->engine()->getActivity();
             else
-                if ( comps.count(master_name) && comps[master_name].act )
-		    master_act = comps[master_name].act;
+                if ( compmap.count(master_name) && compmap[master_name].act )
+            master_act = compmap[master_name].act;
                 else
 		    master_act = this->getPeer(master_name) ? getPeer(master_name)->engine()->getActivity() : 0; // last resort.
 
@@ -2045,7 +2123,7 @@ namespace OCL
             }
         }
         // this is required for lateron attaching the engine()
-        comps[comp_name].instance = peer;
+        compmap[comp_name].instance = peer;
         if ( peer->isRunning() ) {
             log(Error) << "Can't change activity of component "<<comp_name<<" since it is still running."<<endlog();
             return false;
@@ -2091,11 +2169,31 @@ namespace OCL
             return false;
         }
 
+        // assign default wait period policy to newly created activity
+        newact->thread()->setWaitPeriodPolicy(defaultWaitPeriodPolicy);
+
         // this must never happen if component is running:
         assert( peer->isRunning() == false );
-        delete comps[comp_name].act;
-        comps[comp_name].act = newact;
+        delete compmap[comp_name].act;
+        compmap[comp_name].act = newact;
 
+        return true;
+    }
+
+    bool DeploymentComponent::setWaitPeriodPolicy(const std::string& comp_name, int policy)
+    {
+        if ( !compmap.count(comp_name) ) {
+            log(Error) << "Can't setWaitPeriodPolicy: component "<<comp_name<<" not found."<<endlog();
+            return false;
+        }
+
+        RTT::base::ActivityInterface *activity = compmap[comp_name].instance->getActivity();
+        if ( !activity ) {
+            log(Error) << "Can't setWaitPeriodPolicy: component "<<comp_name<<" has no activity (yet)."<<endlog();
+            return false;
+        }
+
+        activity->thread()->setWaitPeriodPolicy(policy);
         return true;
     }
 
@@ -2231,7 +2329,7 @@ namespace OCL
     {
         RTT::Logger::In in("kickOutComponent");
 
-        RTT::TaskContext* peer = comps.count(comp_name) ? comps[ comp_name ].instance : 0;
+        RTT::TaskContext* peer = compmap.count(comp_name) ? compmap[ comp_name ].instance : 0;
 
         if ( !peer ) {
             log(Error) << "Component not loaded by this Deployer: "<< comp_name <<endlog();

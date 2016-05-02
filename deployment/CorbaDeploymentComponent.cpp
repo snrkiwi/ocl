@@ -86,6 +86,7 @@ CorbaDeploymentComponent::CorbaDeploymentComponent(const std::string& name, cons
         ComponentLoader::Instance()->addFactory("IOR", &createTaskContextProxyIOR);
 
         this->addOperation("server", &CorbaDeploymentComponent::createServer, this, ClientThread).doc("Creates a CORBA TaskContext server for the given component").arg("tc", "Name of the RTT::TaskContext (must be a peer).").arg("UseNamingService", "Set to true to use the naming service.");
+        this->addOperation("aliasServer", &CorbaDeploymentComponent::createAliasServer, this, ClientThread).doc("Creates a CORBA TaskContext server for the given component using an alias").arg("tc", "Name of the RTT::TaskContext (must be a peer).").arg("alias", "Alias to use when registering to the CORBA Namingservice").arg("UseNamingService", "Set to true to use the naming service.");
     }
 
     CorbaDeploymentComponent::~CorbaDeploymentComponent()
@@ -106,12 +107,23 @@ CorbaDeploymentComponent::CorbaDeploymentComponent(const std::string& name, cons
         return false;
     }
 
+    bool CorbaDeploymentComponent::createAliasServer(const std::string& tc, const std::string& alias, bool use_naming)
+    {
+        RTT::TaskContext* peer = this->getPeer(tc);
+        if (!peer) {
+            log(Error)<<"No such peer: "<< tc <<endlog();
+            return false;
+        }
+        if ( ::RTT::corba::TaskContextServer::Create(peer, alias, use_naming) != 0 )
+            return true;
+        return false;
+    }
 
     bool CorbaDeploymentComponent::componentLoaded(RTT::TaskContext* c)
     {
         if ( dynamic_cast<RTT::corba::TaskContextProxy*>(c) ) {
             // is a proxy.
-            for ( CompList::iterator cit = comps.begin(); cit != comps.end(); ++cit) {
+            for ( CompMap::iterator cit = compmap.begin(); cit != compmap.end(); ++cit) {
                 if (cit->second.instance == c) {
                     cit->second.proxy = true;
                     return true;
@@ -121,8 +133,8 @@ CorbaDeploymentComponent::CorbaDeploymentComponent(const std::string& name, cons
             assert(false);
             return false;
         }
-        bool use_naming = comps[c->getName()].use_naming;
-        bool server = comps[c->getName()].server;
+        bool use_naming = compmap[c->getName()].use_naming;
+        bool server = compmap[c->getName()].server;
         log(Info) << "Name:"<< c->getName() << " Server: " << server << " Naming: " << use_naming <<endlog();
         // create a server, use naming.
         if (server)
