@@ -203,7 +203,6 @@ int main(int argc, char** argv)
             // We don't start an interactive console when we're a daemon
             if ( !deploymentOnlyChecked && !vm.count("daemon") ) {
                 OCL::TaskBrowser tb( &dc );
-
                 tb.loop();
 
                 dc.shutdownDeployment();
