@@ -62,7 +62,11 @@
 #include <fstream>
 #include <set>
 
-
+#define ENABLE_SHUTDOWN_DEPLOYMENT_DEBUGGING
+#ifdef ENABLE_SHUTDOWN_DEPLOYMENT_DEBUGGING
+#  include <rtt/scripting/ScriptingService.hpp>
+#  include <rtt/scripting/StateMachine.hpp>
+#endif // ENABLE_SHUTDOWN_DEPLOYMENT_DEBUGGING
 
 using namespace Orocos;
 
@@ -2249,6 +2253,32 @@ namespace OCL
 
     void DeploymentComponent::shutdownDeployment()
     {
+#ifdef ENABLE_SHUTDOWN_DEPLOYMENT_DEBUGGING
+        RTT::Logger::Instance()->setLogLevel(RTT::Logger::RealTime);
+        RTT::Logger::Instance()->allowRealTime();
+
+        // Enable trace mode in all state machines
+        {
+            for (int group = nextGroup ; group != -1; --group) {
+                for ( CompList::iterator cit = comps.begin(); cit != comps.end(); ++cit) {
+                    ComponentData* it = &(cit->second);
+                    if ( (group == it->group) && it->instance && !it->proxy ) {
+                        boost::shared_ptr<RTT::scripting::ScriptingService> scripting
+                                = boost::dynamic_pointer_cast<RTT::scripting::ScriptingService>(it->instance->provides()->getService("scripting"));
+                        if ( scripting ) {
+                            std::vector<std::string> state_machines = scripting->getStateMachineList();
+                            for( std::vector<std::string>::const_iterator it2 = state_machines.begin(); it2 != state_machines.end(); ++it2) {
+                                RTT::scripting::StateMachinePtr sm = scripting->getStateMachine(*it2);
+                                log(Debug) << "Enabling trace mode in StateMachine " << it->instance->getName() << "." << sm->getName() << endlog();
+                                sm->trace(true);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+#endif // ENABLE_SHUTDOWN_DEPLOYMENT_DEBUGGING
+
         static const char*	PEER="Application";
         static const char*	NAME="shutdownDeployment";
 
