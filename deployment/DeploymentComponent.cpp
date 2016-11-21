@@ -2265,11 +2265,19 @@ namespace OCL
         RTT::Logger::Instance()->setLogLevel(RTT::Logger::RealTime);
         RTT::Logger::Instance()->allowRealTime();
 
+//        // Switch LogAppender to SequentialActivity to disable log event buffering
+//        RTT::TaskContext *log_appender = comps["LogAppender"].instance;
+//        if (log_appender) {
+//            log_appender->stop();
+//            log_appender->setActivity(new extras::SequentialActivity);
+//            log_appender->start();
+//        }
+
         // Enable trace mode in all state machines
         {
             for (int group = nextGroup ; group != -1; --group) {
-                for ( CompList::iterator cit = comps.begin(); cit != comps.end(); ++cit) {
-                    ComponentData* it = &(cit->second);
+                for ( CompList::reverse_iterator cit = comps.rbegin(); cit != comps.rend(); ++cit) {
+                    ComponentData* it = &(compmap[*cit]);
                     if ( (group == it->group) && it->instance && !it->proxy ) {
                         boost::shared_ptr<RTT::scripting::ScriptingService> scripting
                                 = boost::dynamic_pointer_cast<RTT::scripting::ScriptingService>(it->instance->provides()->getService("scripting"));
