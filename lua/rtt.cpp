@@ -44,18 +44,10 @@ static TaskContext* __getTC(lua_State*);
 
 #define DEBUG
 
-#ifdef MSVC
 #ifdef DEBUG
 # define _DBG(fmt, ...) printf("%s:%d\t" fmt "\n", __FUNCTION__, __LINE__, __VA_ARGS__)
 #else
-# define _DBG(fmt, ...) do { } while(0);
-#endif
-#else
-#ifdef DEBUG
-# define _DBG(fmt, args...) printf("%s:%d\t" fmt "\n", __FUNCTION__, __LINE__, ##args)
-#else
-# define _DBG(fmt, args...) do { } while(0);
-#endif
+# define _DBG(fmt, ...) do { } while(0)
 #endif
 
 /*
@@ -3130,6 +3122,7 @@ bool call_func(lua_State *L, const char *fname, TaskContext *tc,
 	if (lua_pcall(L, 0, num_res, 0) != 0) {
 		Logger::log(Logger::Error) << "LuaComponent '"<< tc->getName()  <<"': error calling function "
 					   << fname << ": " << lua_tostring(L, -1) << endlog();
+		lua_pop(L, 1);
 		ret = false;
 		goto out;
 	}
@@ -3139,6 +3132,7 @@ bool call_func(lua_State *L, const char *fname, TaskContext *tc,
 			Logger::log(Logger::Error) << "LuaComponent '" << tc->getName() << "': " << fname
 						   << " must return a bool but returned a "
 						   << lua_typename(L, lua_type(L, -1)) << endlog();
+			lua_pop(L, 1);
 			ret = false;
 			goto out;
 		}
