@@ -24,7 +24,6 @@
  *   Suite 330, Boston, MA  02111-1307  USA                                *
  ***************************************************************************/
 
-
 #include <rtt/rtt-config.h>
 #ifdef OS_RT_MALLOC
 // need access to all TLSF functions embedded in RTT
@@ -33,11 +32,13 @@
 #endif
 #include <rtt/os/main.h>
 #include <rtt/RTT.hpp>
+#include <rtt/Logger.hpp>
 
 #include <taskbrowser/TaskBrowser.hpp>
 #include <deployment/CorbaDeploymentComponent.hpp>
 #include <rtt/transports/corba/TaskContextServer.hpp>
 #include <iostream>
+#include <string>
 #include "deployer-funcs.hpp"
 
 #include <rtt/transports/corba/corba.h>
@@ -50,7 +51,6 @@
 #include "logging/Category.hpp"
 #endif
 
-using namespace std;
 using namespace RTT;
 using namespace RTT::corba;
 namespace po = boost::program_options;
@@ -102,14 +102,13 @@ int main(int argc, char** argv)
     // if TAO options not found then process all command line options,
     // otherwise process all options up to but not including "--"
 	int rc = OCL::deployerParseCmdLine(!found ? argc : taoIndex, argv,
-                                       siteFile, scriptFiles, name, requireNameService,deploymentOnlyChecked,
+                                       siteFile, scriptFiles, name, requireNameService, deploymentOnlyChecked,
 									   minNumberCPU,
                                        vm, &otherOptions);
 	if (0 != rc)
 	{
 		return rc;
 	}
-
 
 	// check system capabilities
 	rc = OCL::enforceMinNumberCPU(minNumberCPU);
@@ -128,12 +127,13 @@ int main(int argc, char** argv)
 #ifdef  ORO_BUILD_RTALLOC
     size_t                  memSize     = rtallocMemorySize.size;
     void*                   rtMem       = 0;
+    size_t                  freeMem     = 0;
     if (0 < memSize)
     {
         // don't calloc() as is first thing TLSF does.
         rtMem = malloc(memSize);
-        assert(rtMem);
-        size_t freeMem = init_memory_pool(memSize, rtMem);
+        assert(0 != rtMem);
+        freeMem = init_memory_pool(memSize, rtMem);
         if ((size_t)-1 == freeMem)
         {
             cerr << "Invalid memory pool size of " << memSize
@@ -152,6 +152,11 @@ int main(int argc, char** argv)
         OCL::logging::Category::createOCLCategory);
 #endif
 
+
+    /******************** WARNING ***********************
+     *   NO log(...) statements before __os_init() !!!!! 
+     ***************************************************/
+
     // start Orocos _AFTER_ setting up log4cpp
 	if (0 == __os_init(argc - taoIndex, &argv[taoIndex]))
     {
@@ -159,6 +164,7 @@ int main(int argc, char** argv)
         log(Info) << "OCL factory set for real-time logging" << endlog();
 #endif
         rc = -1;     // prove otherwise
+        // scope to force dc destruction prior to memory free
         try {
             // if TAO options not found then have TAO process just the program name,
             // otherwise TAO processes the program name plus all options (potentially
@@ -235,6 +241,18 @@ int main(int argc, char** argv)
             // catch this so that we can destroy the TLSF memory correctly
             log(Error) << "Uncaught exception." << endlog();
         }
+#ifdef  ORO_BUILD_RTALLOC
+        if (0 != rtMem)
+            {
+                // print statistics after deployment finished, but before os_exit() (needs Logger):
+                log(Debug) << "TLSF bytes allocated=" << memSize
+                           << " overhead=" << (memSize - freeMem)
+                           << " max-used=" << get_max_size(rtMem)
+                           << " currently-used=" << get_used_size(rtMem)
+                           << " still-allocated=" << (get_used_size(rtMem) - (memSize - freeMem))
+                           << endlog();
+            }
+#endif
 
 		// shutdown Orocos
 		__os_exit();
@@ -245,13 +263,18 @@ int main(int argc, char** argv)
         rc = -1;
 	}
 
+#ifdef  ORO_BUILD_LOGGING
+    log4cpp::HierarchyMaintainer::getDefaultMaintainer().shutdown();
+    log4cpp::HierarchyMaintainer::getDefaultMaintainer().deleteAllCategories();
+#endif
+
 #ifdef  ORO_BUILD_RTALLOC
-    if (!rtMem)
+    if (0 != rtMem)
     {
         destroy_memory_pool(rtMem);
         free(rtMem);
     }
-#endif  // ORO_BUILD_RTALLOC
+#endif
 
     return rc;
 }
