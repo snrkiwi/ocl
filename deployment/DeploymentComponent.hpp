@@ -164,9 +164,11 @@ namespace OCL
         ConMap conmap;
 
         /**
-         * This vector holds the dynamically loaded components.
+         * This list and map hold the dynamically loaded components.
          */
-        typedef std::map<std::string, ComponentData> CompList;
+        typedef std::map<std::string, ComponentData> CompMap;
+        typedef std::list<std::string> CompList;
+        CompMap compmap;
         CompList comps;
 
         /**
@@ -181,7 +183,7 @@ namespace OCL
          * This method removes all references to the component hold in \a cit,
          * on the condition that it is not running.
          */
-        bool unloadComponentImpl( CompList::iterator cit );
+        bool unloadComponentImpl( CompMap::iterator cit );
 
 
         /**
@@ -270,7 +272,7 @@ namespace OCL
          */
         ~DeploymentComponent();
 
-        RTT::TaskContext* myGetPeer(std::string name) {return comps[ name ].instance; }
+        RTT::TaskContext* myGetPeer(std::string name) {return compmap[ name ].instance; }
 
         /**
          * Make two components peers in both directions, such that both can
@@ -792,6 +794,28 @@ namespace OCL
          * in a row, given no failures occur along the way.
          */
         bool kickStart(const std::string& file_name);
+
+        /**
+         * This function runs loadComponents and configureComponents, and
+         * optionally startComponents, in a row, given no failures occur along
+         * the way.
+         *
+         * @param configurationfile The file to load
+         * @param doStart True to run startComponents, otherwise the components
+         * are only loaded and configured.
+         * @param loadOk True if successfully loaded the file
+         * @param configureOk True if successfully configured all components
+         * loaded from the file
+         * @param startOk True if did not want to start (doStart==false) or
+         * did want to start (doStart==true) and successfully started all
+         * components loaded from the file, otherwise false
+         * @return (loadOk && configureOk && (!doStart || startOk))
+         */
+        bool kickStart2(const std::string& configurationfile,
+                        const bool         doStart,
+                        bool&              loadOk,
+                        bool&              configureOk,
+                        bool&              startOk);
 
         /**
          * Stop, cleanup and unload a single component which were loaded by this component.
