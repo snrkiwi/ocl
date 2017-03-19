@@ -24,7 +24,6 @@
  *   Suite 330, Boston, MA  02111-1307  USA                                *
  ***************************************************************************/
 
-
 #include <rtt/rtt-config.h>
 #ifdef OS_RT_MALLOC
 // need access to all TLSF functions embedded in RTT
@@ -33,11 +32,13 @@
 #endif
 #include <rtt/os/main.h>
 #include <rtt/RTT.hpp>
+#include <rtt/Logger.hpp>
 
 #include <taskbrowser/TaskBrowser.hpp>
 #include <deployment/CorbaDeploymentComponent.hpp>
 #include <rtt/transports/corba/TaskContextServer.hpp>
 #include <iostream>
+#include <string>
 #include "deployer-funcs.hpp"
 
 #include <rtt/transports/corba/corba.h>
@@ -50,7 +51,6 @@
 #include "logging/Category.hpp"
 #endif
 
-using namespace std;
 using namespace RTT;
 using namespace RTT::corba;
 namespace po = boost::program_options;
@@ -103,14 +103,13 @@ int main(int argc, char** argv)
     // if TAO options not found then process all command line options,
     // otherwise process all options up to but not including "--"
 	int rc = OCL::deployerParseCmdLine(!found ? argc : taoIndex, argv,
-                                       siteFile, scriptFiles, name, requireNameService,deploymentOnlyChecked,
+                                       siteFile, scriptFiles, name, requireNameService, deploymentOnlyChecked,
 									   minNumberCPU,
                                        vm, &otherOptions);
 	if (0 != rc)
 	{
 		return rc;
 	}
-
 
 	// check system capabilities
 	rc = OCL::enforceMinNumberCPU(minNumberCPU);
@@ -139,6 +138,11 @@ int main(int argc, char** argv)
         OCL::logging::Category::createOCLCategory);
 #endif
 
+
+    /******************** WARNING ***********************
+     *   NO log(...) statements before __os_init() !!!!! 
+     ***************************************************/
+
     // start Orocos _AFTER_ setting up log4cpp
 	if (0 == __os_init(argc - taoIndex, &argv[taoIndex]))
     {
@@ -146,6 +150,7 @@ int main(int argc, char** argv)
         log(Info) << "OCL factory set for real-time logging" << endlog();
 #endif
         rc = -1;     // prove otherwise
+        // scope to force dc destruction prior to memory free
         try {
             // if TAO options not found then have TAO process just the program name,
             // otherwise TAO processes the program name plus all options (potentially
@@ -236,6 +241,11 @@ int main(int argc, char** argv)
 		std::cerr << "Unable to start Orocos" << std::endl;
         rc = -1;
 	}
+
+#ifdef  ORO_BUILD_LOGGING
+    log4cpp::HierarchyMaintainer::getDefaultMaintainer().shutdown();
+    log4cpp::HierarchyMaintainer::getDefaultMaintainer().deleteAllCategories();
+#endif
 
 #ifdef  ORO_BUILD_RTALLOC
     memoryPool.shutdown();
