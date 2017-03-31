@@ -16,7 +16,7 @@ Appender::Appender(std::string name) :
         layoutPattern_prop("LayoutPattern", "Layout conversion pattern (for those layouts that use a pattern)"),
         countMaxPopped(0)
 {
-    ports()->addEventPort("LogPort", log_port );
+    ports()->addPort("LogPort", log_port );
 
     properties()->addProperty(layoutName_prop);
     properties()->addProperty(layoutPattern_prop);
