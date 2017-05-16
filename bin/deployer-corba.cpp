@@ -24,7 +24,6 @@
  *   Suite 330, Boston, MA  02111-1307  USA                                *
  ***************************************************************************/
 
-
 #include <rtt/rtt-config.h>
 #ifdef OS_RT_MALLOC
 // need access to all TLSF functions embedded in RTT
@@ -33,11 +32,13 @@
 #endif
 #include <rtt/os/main.h>
 #include <rtt/RTT.hpp>
+#include <rtt/Logger.hpp>
 
 #include <taskbrowser/TaskBrowser.hpp>
 #include <deployment/CorbaDeploymentComponent.hpp>
 #include <rtt/transports/corba/TaskContextServer.hpp>
 #include <iostream>
+#include <string>
 #include "deployer-funcs.hpp"
 
 #include <rtt/transports/corba/corba.h>
@@ -50,7 +51,6 @@
 #include "logging/Category.hpp"
 #endif
 
-using namespace std;
 using namespace RTT;
 using namespace RTT::corba;
 namespace po = boost::program_options;
@@ -73,6 +73,7 @@ int main(int argc, char** argv)
     OCL::memorySize         rtallocMemorySize   = ORO_DEFAULT_RTALLOC_SIZE;
 	po::options_description rtallocOptions      = OCL::deployerRtallocOptions(rtallocMemorySize);
 	otherOptions.add(rtallocOptions);
+    OCL::TLSFMemoryPool     memoryPool;
 #endif
 
 #if     defined(ORO_BUILD_LOGGING) && defined(OROSEM_LOG4CPP_LOGGING)
@@ -102,14 +103,13 @@ int main(int argc, char** argv)
     // if TAO options not found then process all command line options,
     // otherwise process all options up to but not including "--"
 	int rc = OCL::deployerParseCmdLine(!found ? argc : taoIndex, argv,
-                                       siteFile, scriptFiles, name, requireNameService,deploymentOnlyChecked,
+                                       siteFile, scriptFiles, name, requireNameService, deploymentOnlyChecked,
 									   minNumberCPU,
                                        vm, &otherOptions);
 	if (0 != rc)
 	{
 		return rc;
 	}
-
 
 	// check system capabilities
 	rc = OCL::enforceMinNumberCPU(minNumberCPU);
@@ -126,23 +126,9 @@ int main(int argc, char** argv)
 #endif
 
 #ifdef  ORO_BUILD_RTALLOC
-    size_t                  memSize     = rtallocMemorySize.size;
-    void*                   rtMem       = 0;
-    if (0 < memSize)
+    if (!memoryPool.initialize(rtallocMemorySize.size))
     {
-        // don't calloc() as is first thing TLSF does.
-        rtMem = malloc(memSize);
-        assert(rtMem);
-        size_t freeMem = init_memory_pool(memSize, rtMem);
-        if ((size_t)-1 == freeMem)
-        {
-            cerr << "Invalid memory pool size of " << memSize
-                          << " bytes (TLSF has a several kilobyte overhead)." << endl;
-            free(rtMem);
-            return -1;
-        }
-        cout << "Real-time memory: " << freeMem << " bytes free of "
-                  << memSize << " allocated." << endl;
+        return -1;
     }
 #endif  // ORO_BUILD_RTALLOC
 
@@ -152,6 +138,11 @@ int main(int argc, char** argv)
         OCL::logging::Category::createOCLCategory);
 #endif
 
+
+    /******************** WARNING ***********************
+     *   NO log(...) statements before __os_init() !!!!! 
+     ***************************************************/
+
     // start Orocos _AFTER_ setting up log4cpp
 	if (0 == __os_init(argc - taoIndex, &argv[taoIndex]))
     {
@@ -159,6 +150,7 @@ int main(int argc, char** argv)
         log(Info) << "OCL factory set for real-time logging" << endlog();
 #endif
         rc = -1;     // prove otherwise
+        // scope to force dc destruction prior to memory free
         try {
             // if TAO options not found then have TAO process just the program name,
             // otherwise TAO processes the program name plus all options (potentially
@@ -192,12 +184,17 @@ int main(int argc, char** argv)
                     {
                         if ( (*iter).rfind(".xml",string::npos) == (*iter).length() - 4 || (*iter).rfind(".cpf",string::npos) == (*iter).length() - 4) {
                             if ( deploymentOnlyChecked ) {
-                                if (!dc.loadComponents( (*iter) )) {
+                                bool loadOk         = true;
+                                bool configureOk    = true;
+                                bool startOk        = true;
+                                if (!dc.kickStart2( (*iter), false, loadOk, configureOk, startOk )) {
                                     result = false;
-                                    log(Error) << "Failed to load file: '"<< (*iter) <<"'." << endlog();
-                                } else if (!dc.configureComponents()) {
-                                    result = false;
-                                    log(Error) << "Failed to configure file: '"<< (*iter) <<"'." << endlog();
+                                    if (!loadOk) {
+                                        log(Error) << "Failed to load file: '"<< (*iter) <<"'." << endlog();
+                                    } else if (!configureOk) {
+                                        log(Error) << "Failed to configure file: '"<< (*iter) <<"'." << endlog();
+                                    }
+                                    (void)startOk;      // unused - avoid compiler warning
                                 }
                                 // else leave result=true and continue
                             } else {
@@ -245,12 +242,13 @@ int main(int argc, char** argv)
         rc = -1;
 	}
 
+#ifdef  ORO_BUILD_LOGGING
+    log4cpp::HierarchyMaintainer::getDefaultMaintainer().shutdown();
+    log4cpp::HierarchyMaintainer::getDefaultMaintainer().deleteAllCategories();
+#endif
+
 #ifdef  ORO_BUILD_RTALLOC
-    if (!rtMem)
-    {
-        destroy_memory_pool(rtMem);
-        free(rtMem);
-    }
+    memoryPool.shutdown();
 #endif  // ORO_BUILD_RTALLOC
 
     return rc;

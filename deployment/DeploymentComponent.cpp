@@ -656,21 +656,54 @@ namespace OCL
 
     bool DeploymentComponent::kickStart(const std::string& configurationfile)
     {
+        bool              loadOk        = true;
+        bool              configureOk   = true;
+        bool              startOk       = true;
+
+        const bool rc = kickStart2(configurationfile, true, loadOk, configureOk, startOk);
+
+        // avoid compiler warnings
+        (void)loadOk;
+        (void)configureOk;
+        (void)startOk;
+
+        return rc;
+    }
+
+    bool DeploymentComponent::kickStart2(const std::string& configurationfile,
+                                         const bool         doStart,
+                                         bool&              loadOk,
+                                         bool&              configureOk,
+                                         bool&              startOk)
+    {
+        // set defaults
+        loadOk      = true;
+        configureOk = true;
+        startOk     = true;
+
         int thisGroup = nextGroup;
         ++nextGroup;    // whether succeed or fail
         if ( this->loadComponentsInGroup(configurationfile, thisGroup) ) {
             if (this->configureComponentsGroup(thisGroup) ) {
-                if ( this->startComponentsGroup(thisGroup) ) {
-                    log(Info) <<"Successfully loaded, configured and started components from "<< configurationfile <<endlog();
-                    return true;
+                if (doStart) {
+                    if ( this->startComponentsGroup(thisGroup) ) {
+                        log(Info) <<"Successfully loaded, configured and started components from "<< configurationfile <<endlog();
+                        return true;
+                    } else {
+                        log(Error) <<"Failed to start a component: aborting kick-start."<<endlog();
+                        startOk = false;
+                    }
                 } else {
-                    log(Error) <<"Failed to start a component: aborting kick-start."<<endlog();
+                    log(Info) <<"Successfully loaded and configured (but did not start) components from "<< configurationfile <<endlog();
+                    return true;
                 }
             } else {
                 log(Error) <<"Failed to configure a component: aborting kick-start."<<endlog();
+                configureOk = false;
             }
         } else {
             log(Error) <<"Failed to load a component: aborting kick-start."<<endlog();
+            loadOk = false;
         }
         return false;
     }
@@ -2070,10 +2103,11 @@ namespace OCL
         else
             // special cases:
             if ( act_type == "PeriodicActivity" && period != 0.0)
+                // WARNING RTT::PeriodicActivity does not support a name!
                 newact = new RTT::extras::PeriodicActivity(scheduler, priority, period, cpu_affinity, 0);
             else
             if ( act_type == "NonPeriodicActivity" && period == 0.0)
-                newact = new RTT::Activity(scheduler, priority, period, cpu_affinity, 0);
+                newact = new RTT::Activity(scheduler, priority, period, cpu_affinity, 0, comp_name);
             else
                 if ( act_type == "SlaveActivity" ) {
                     if ( master_act == 0 )
@@ -2093,7 +2127,7 @@ namespace OCL
                         }
 			else if ( act_type == "FileDescriptorActivity") {
 				using namespace RTT::extras;
-                newact = new FileDescriptorActivity(scheduler, priority, period, cpu_affinity, 0);
+                newact = new FileDescriptorActivity(scheduler, priority, period, cpu_affinity, 0, comp_name);
 				FileDescriptorActivity* fdact = dynamic_cast< RTT::extras::FileDescriptorActivity* > (newact);
 				if (fdact) fdact->setTimeout(period);
 				else newact = 0;
@@ -2265,11 +2299,19 @@ namespace OCL
         RTT::Logger::Instance()->setLogLevel(RTT::Logger::RealTime);
         RTT::Logger::Instance()->allowRealTime();
 
+//        // Switch LogAppender to SequentialActivity to disable log event buffering
+//        RTT::TaskContext *log_appender = comps["LogAppender"].instance;
+//        if (log_appender) {
+//            log_appender->stop();
+//            log_appender->setActivity(new extras::SequentialActivity);
+//            log_appender->start();
+//        }
+
         // Enable trace mode in all state machines
         {
             for (int group = nextGroup ; group != -1; --group) {
-                for ( CompList::iterator cit = comps.begin(); cit != comps.end(); ++cit) {
-                    ComponentData* it = &(cit->second);
+                for ( CompList::reverse_iterator cit = comps.rbegin(); cit != comps.rend(); ++cit) {
+                    ComponentData* it = &(compmap[*cit]);
                     if ( (group == it->group) && it->instance && !it->proxy ) {
                         boost::shared_ptr<RTT::scripting::ScriptingService> scripting
                                 = boost::dynamic_pointer_cast<RTT::scripting::ScriptingService>(it->instance->provides()->getService("scripting"));

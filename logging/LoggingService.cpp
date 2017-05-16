@@ -101,6 +101,7 @@ bool LoggingService::configureHook()
             }
             
             log(Debug) << "Getting category '" << categoryName << "'" << endlog();
+            // will create category if not exists
             log4cpp::Category& category =
                 log4cpp::Category::getInstance(categoryName);
 
@@ -142,6 +143,7 @@ bool LoggingService::configureHook()
             // "" == categoryName implies the root category.
 
             log(Debug) << "Getting category '" << categoryName << "'" << endlog();
+            // will create category if not exists
             log4cpp::Category& category =
             log4cpp::Category::getInstance(categoryName);
 
@@ -171,20 +173,13 @@ bool LoggingService::configureHook()
             std::string categoryName    = association->getName();
             std::string appenderName    = association->value();
             
-            // find category 
-            log4cpp::Category* p = log4cpp::HierarchyMaintainer::getDefaultMaintainer().getExistingInstance(categoryName);
+            // find category - will create category if not exists
+            log4cpp::Category& p   = log4cpp::Category::getInstance(categoryName);
             OCL::logging::Category* category =
-                dynamic_cast<OCL::logging::Category*>(p);
+                dynamic_cast<OCL::logging::Category*>(&p);
             if (0 == category)
             {
-                if (0 != p)
-                {
-                    log(Error) << "Category '" << categoryName << "' is not an OCL category: type is '" << typeid(*p).name() << "'" << endlog();
-                }
-                else
-                {
-                    log(Error) << "Category '" << categoryName << "' does not exist!" << endlog();
-                }
+                log(Error) << "Category '" << categoryName << "' is not an OCL category: type is '" << typeid(p).name() << "'" << endlog();
                 ok = false;
                 break;
             }
@@ -247,8 +242,9 @@ bool LoggingService::setCategoryPriority(const std::string& name,
     {
         try {
             c->setPriority(priority);
+            const std::string level = log4cpp::Priority::getPriorityName(priority);
             rc = true;
-            log(Info)  << "Category '" << name << "' set to priority " << endlog();
+            log(Info)  << "Category '" << name << "' set to priority '" << level << "'"  << endlog();
         } catch (...) {
             log(Error) << "Priority value '" << priority << "' is not known!" << endlog();
         }
@@ -294,15 +290,19 @@ void LoggingService::logCategories()
     {
         std::stringstream str;
 
+        OCL::logging::Category* c = dynamic_cast<OCL::logging::Category*>(*iter);
         str
             << "Category '" << (*iter)->getName() << "', level="
             << log4cpp::Priority::getPriorityName((*iter)->getPriority())
             << ", typeid='"
             << typeid(*iter).name()
             << "', type really is '" 
-            << std::string(0 != dynamic_cast<OCL::logging::Category*>(*iter)
-                           ? "OCL::Category" : "log4cpp::Category")
+            << std::string(0 != c ? "OCL::Category" : "log4cpp::Category")
             << "', additivity=" << (const char*)((*iter)->getAdditivity()?"yes":"no");
+        if (0 != c)
+        {
+            str << ", port=" << (c->log_port.connected() ? "connected" : "not connected");
+        }
         log4cpp::Category* p = (*iter)->getParent();
         if (p)
         {

@@ -56,7 +56,6 @@
 
 using namespace RTT;
 namespace po = boost::program_options;
-using namespace std;
 
 int main(int argc, char** argv)
 {
@@ -73,6 +72,7 @@ int main(int argc, char** argv)
     OCL::memorySize             rtallocMemorySize   = ORO_DEFAULT_RTALLOC_SIZE;
 	po::options_description     rtallocOptions      = OCL::deployerRtallocOptions(rtallocMemorySize);
 	otherOptions.add(rtallocOptions);
+    OCL::TLSFMemoryPool         memoryPool;
 #endif
 
 #if     defined(ORO_BUILD_LOGGING) && defined(OROSEM_LOG4CPP_LOGGING)
@@ -99,11 +99,10 @@ int main(int argc, char** argv)
     // if extra options not found then process all command line options,
     // otherwise process all options up to but not including "--"
     int rc = OCL::deployerParseCmdLine(!found ? argc : optIndex, argv,
-                                       siteFile, scriptFiles, name, requireNameService,deploymentOnlyChecked,
+                                       siteFile, scriptFiles, name, requireNameService, deploymentOnlyChecked,
 									   minNumberCPU,
                                        vm, &otherOptions);
-
-    if (0 != rc)
+	if (0 != rc)
 	{
 		return rc;
 	}
@@ -123,28 +122,14 @@ int main(int argc, char** argv)
 #endif
 
 #ifdef  ORO_BUILD_RTALLOC
-    size_t                  memSize     = rtallocMemorySize.size;
-    void*                   rtMem       = 0;
-    size_t                  freeMem     = 0;
-    if (0 < memSize)
+    if (!memoryPool.initialize(rtallocMemorySize.size))
     {
-        // don't calloc() as is first thing TLSF does.
-        rtMem = malloc(memSize);
-        assert(0 != rtMem);
-        freeMem = init_memory_pool(memSize, rtMem);
-        if ((size_t)-1 == freeMem)
-        {
-            cerr << "Invalid memory pool size of " << memSize 
-                          << " bytes (TLSF has a several kilobyte overhead)." << endl;
-            free(rtMem);
-            return -1;
-        }
-        cout << "Real-time memory: " << freeMem << " bytes free of "
-                  << memSize << " allocated." << endl;
+        return -1;
     }
 #endif  // ORO_BUILD_RTALLOC
 
 #ifdef  ORO_BUILD_LOGGING
+    // use our log4cpp-derived categories to do real-time logging
     log4cpp::HierarchyMaintainer::set_category_factory(
         OCL::logging::Category::createOCLCategory);
 #endif
@@ -160,6 +145,7 @@ int main(int argc, char** argv)
 #ifdef  ORO_BUILD_LOGGING
         log(Info) << "OCL factory set for real-time logging" << endlog();
 #endif
+        rc = -1;     // prove otherwise
         // scope to force dc destruction prior to memory free
         {
             OCL::DeploymentComponent dc( name, siteFile );
@@ -179,12 +165,17 @@ int main(int argc, char** argv)
                 {
                     if ( (*iter).rfind(".xml",std::string::npos) == (*iter).length() - 4 || (*iter).rfind(".cpf",std::string::npos) == (*iter).length() - 4) {
                         if ( deploymentOnlyChecked ) {
-                            if (!dc.loadComponents( (*iter) )) {
+                            bool loadOk         = true;
+                            bool configureOk    = true;
+                            bool startOk        = true;
+                            if (!dc.kickStart2( (*iter), false, loadOk, configureOk, startOk )) {
                                 result = false;
-                                log(Error) << "Failed to load file: '"<< (*iter) <<"'." << endlog();
-                            } else if (!dc.configureComponents()) {
-                                result = false;
-                                log(Error) << "Failed to configure file: '"<< (*iter) <<"'." << endlog();
+                                if (!loadOk) {
+                                    log(Error) << "Failed to load file: '"<< (*iter) <<"'." << endlog();
+                                } else if (!configureOk) {
+                                    log(Error) << "Failed to configure file: '"<< (*iter) <<"'." << endlog();
+                                }
+                                (void)startOk;      // unused - avoid compiler warning
                             }
                             // else leave result=true and continue
                         } else {
@@ -209,20 +200,9 @@ int main(int argc, char** argv)
             }
 #endif
         }
-#ifdef  ORO_BUILD_RTALLOC
-        if (0 != rtMem)
-            {
-                // print statistics after deployment finished, but before os_exit() (needs Logger):
-                log(Debug) << "TLSF bytes allocated=" << memSize
-                           << " overhead=" << (memSize - freeMem)
-                           << " max-used=" << get_max_size(rtMem)
-                           << " currently-used=" << get_used_size(rtMem)
-                           << " still-allocated=" << (get_used_size(rtMem) - (memSize - freeMem))
-                           << endlog();
-            }
-#endif
 
-        __os_exit();
+		// shutdown Orocos
+		__os_exit();
 	}
 	else
 	{
@@ -236,18 +216,7 @@ int main(int argc, char** argv)
 #endif
 
 #ifdef  ORO_BUILD_RTALLOC
-    if (0 != rtMem)
-    {
-        std::cout << "TLSF bytes allocated=" << memSize
-                  << " overhead=" << (memSize - freeMem)
-                  << " max-used=" << get_max_size(rtMem)
-                  << " currently-used=" << get_used_size(rtMem)
-                  << " still-allocated=" << (get_used_size(rtMem) - (memSize - freeMem))
-                  << "\n";
-
-        destroy_memory_pool(rtMem);
-        free(rtMem);
-    }
+    memoryPool.shutdown();
 #endif
 
     return rc;

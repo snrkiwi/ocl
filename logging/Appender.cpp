@@ -16,7 +16,7 @@ Appender::Appender(std::string name) :
         layoutPattern_prop("LayoutPattern", "Layout conversion pattern (for those layouts that use a pattern)"),
         countMaxPopped(0)
 {
-    ports()->addEventPort("LogPort", log_port );
+    ports()->addPort("LogPort", log_port );
 
     properties()->addProperty(layoutName_prop);
     properties()->addProperty(layoutPattern_prop);
@@ -88,11 +88,11 @@ void Appender::stopHook()
 		*/
 		std::stringstream	ss;
 		ss << "# countMaxPopped=" << countMaxPopped;
-		log4cpp::LoggingEvent	event("OCL.logging.Appender",
-									  ss.str(),
-									  "",
-									  log4cpp::Priority::DEBUG);
-		appender->doAppend(event);
+		log4cpp::LoggingEvent	ev("OCL.logging.Appender",
+                                   ss.str(),
+                                   "",
+                                   log4cpp::Priority::DEBUG);
+		appender->doAppend(ev);
 	}
 }
 
@@ -113,7 +113,6 @@ void Appender::processEvents(int n)
        a) the buffer is empty
        b) we consume enough events
 	*/
-    OCL::logging::LoggingEvent	event;
 	bool 						again = false;
 	int							count = 0;
 
