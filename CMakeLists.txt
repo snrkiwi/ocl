@@ -136,9 +136,9 @@ CONFIGURE_FILE(Doxyfile.in Doxyfile @ONLY)
 ADD_CUSTOM_TARGET(docapi "doxygen" "Doxyfile")
 ADD_SUBDIRECTORY( doc )
 
-add_custom_target(luadocapi
-  "luadoc" "--nofiles" "-d" "${PROJECT_BINARY_DIR}/doc/luaapi/" "."
-  WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}/lua/docapi/")
+#add_custom_target(luadocapi
+#  "luadoc" "--nofiles" "-d" "${PROJECT_BINARY_DIR}/doc/luaapi/" "."
+#  WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}/lua/docapi/")
 
 if (DOC_ONLY)
   return()
@@ -203,7 +203,7 @@ ADD_SUBDIRECTORY( reporting )
 ADD_SUBDIRECTORY( deployment )
 ADD_SUBDIRECTORY( logging )
 ADD_SUBDIRECTORY( bin )
-ADD_SUBDIRECTORY( lua )
+#ADD_SUBDIRECTORY( lua )
 ADD_SUBDIRECTORY( scripts/pkg )
 
 MESSAGE("Selected Libraries: $ENV{SELECTED_LIBS}")
@@ -246,7 +246,7 @@ ENDIF( DISPLAY_FLAGS )
 INSTALL(FILES package.xml DESTINATION share/ocl)
 
 # Install an env-hook if catkin is found
-find_package(catkin QUIET)
-if(catkin_FOUND)
-  catkin_add_env_hooks(00.ocl-lua SHELLS sh DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/env-hooks)
-endif()
+#find_package(catkin QUIET)
+#if(catkin_FOUND)
+#  catkin_add_env_hooks(00.ocl-lua SHELLS sh DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/env-hooks)
+#endif()
