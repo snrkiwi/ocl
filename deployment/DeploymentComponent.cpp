@@ -38,6 +38,7 @@
 #include <rtt/scripting/Scripting.hpp>
 #include <rtt/ConnPolicy.hpp>
 #include <rtt/plugin/PluginLoader.hpp>
+#include <rtt/types/GlobalsRepository.hpp>
 
 # if defined(_POSIX_VERSION)
 #   define USE_SIGNALS 1
@@ -735,6 +736,10 @@ namespace OCL
         int thisGroup = nextGroup;
         ++nextGroup;    // whether succeed or fail
         if ( this->loadComponentsInGroup(configurationfile, thisGroup) ) {
+            if ( root.empty() ) {
+                log(Warning) <<"No components loaded by DeploymentComponent from "<< configurationfile <<endlog();
+                return true;
+            }
             if (this->configureComponentsGroup(thisGroup) ) {
                 if (doStart) {
                     if ( this->startComponentsGroup(thisGroup) ) {
@@ -931,10 +936,10 @@ namespace OCL
                                 valid = false;
                             continue;
                         }
-                        if ( (*it)->getName() == "GlobalService" ) {
+                        if ( (*it)->getName() == "GlobalsRepository" ) {
                             RTT::Property<RTT::PropertyBag> global = *it;
                             if ( !global.ready() ) {
-                                log(Error)<< "Found 'GlobalService' tag, but it is not a complex xml type"<<endlog();
+                                log(Error)<< "Found 'GlobalsRepository' tag, but it is not a complex xml type"<<endlog();
                                 valid = false;
                                 continue;
                             }
@@ -942,7 +947,7 @@ namespace OCL
                             for (RTT::PropertyBag::const_iterator pf = global.rvalue().begin(); pf!= global.rvalue().end(); ++pf) {
                                 if ( (*pf)->getName() == "Properties"){
                                     RTT::Property<RTT::PropertyBag> props = *pf;
-                                    bool ret = updateProperties( *RTT::internal::GlobalService::Instance()->properties(), props);
+                                    bool ret = updateProperties( *RTT::types::GlobalsRepository::Instance()->properties(), props);
                                     if (!ret) {
                                         log(Error) << "Failed to configure Global Properties from configuration file."<<endlog();
                                         valid = false;
