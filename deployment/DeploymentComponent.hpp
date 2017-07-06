@@ -93,6 +93,7 @@ namespace OCL
          */
         RTT::PropertyBag root;
         std::string compPath;
+        int defaultWaitPeriodPolicy;
         RTT::Property<bool> autoUnload;
         RTT::Attribute<bool> validConfig;
         RTT::Constant<int> sched_RT;
@@ -229,18 +230,6 @@ namespace OCL
          * otherwise
          */
         base::PortInterface* stringToPort(std::string const& names);
-
-        /**
-         * Waits for any signal and then returns.
-         * @return false if this function could not install a signal handler.
-         */
-        bool waitForSignal(int signumber);
-
-        /**
-         * Waits for SIGINT and then returns.
-         * @return false if this function could not install a signal handler.
-         */
-        bool waitForInterrupt();
 
     public:
         /**
@@ -669,6 +658,17 @@ namespace OCL
                          const std::string& master_name = "");
 
         /**
+         * (Re-)set the wait period policy of a component's thread.
+         *
+         * @param comp_name The name of the component to change.
+         * @param policy    The new policy \a ORO_WAIT_ABS or \a ORO_WAIT_REL
+         *
+         * @return false if one of the parameters does not match.
+         */
+        bool setWaitPeriodPolicy(const std::string& comp_name,
+                         int policy);
+
+        /**
          * Load a (partial) application XML configuration from disk. The
          * necessary components are located or loaded, but no
          * component configuration is yet applied. One can load
@@ -977,6 +977,26 @@ namespace OCL
          * then that will be executed, otherwise nothing occurs.
          */
         void shutdownDeployment();
+
+        /**
+         * Waits for any signal in the list and then returns.
+         * @param sigs a pointer to the first element in the list of signals
+         * @param the number of signals in the list
+         * @return false if this function could not install a signal handler.
+         */
+        bool waitForSignals(int *sigs, std::size_t sig_count);
+
+        /**
+         * Waits for any signal and then returns.
+         * @return false if this function could not install a signal handler.
+         */
+        bool waitForSignal(int signumber);
+
+        /**
+         * Waits for SIGINT, SIGTERM or SIGHUP and then returns.
+         * @return false if this function could not install a signal handler.
+         */
+        bool waitForInterrupt();
 
     };
 
