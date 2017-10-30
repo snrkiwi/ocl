@@ -1358,18 +1358,18 @@ namespace OCL
                 }
                 ++p;
             }
-            
+
             // Inform the user of non-optimal connections:
             if ( writer == 0 ) {
                 log(Error) << "No OutputPort listed that writes " << it->first << endlog();
                 valid = false;
                 break;
             }
-            
+
             // connect all ports to writer
             p = connection->ports.begin();
             vector<OutputPortInterface*>::iterator w = writers.begin();
-            
+
             while (w != writers.end() ) {
                 while (p != connection->ports.end() ) {
                     // connect all readers to the list of writers
@@ -1393,7 +1393,7 @@ namespace OCL
         }
         return valid;
     }
-    
+
     bool DeploymentComponent::configureComponents()
     {
         RTT::Logger::In in("configureComponents");

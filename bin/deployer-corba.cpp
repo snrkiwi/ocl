@@ -60,20 +60,20 @@ namespace po = boost::program_options;
 int main(int argc, char** argv)
 {
 	std::string                 siteFile;      // "" means use default in DeploymentComponent.cpp
-    std::vector<std::string>    scriptFiles;
+	std::vector<std::string>    scriptFiles;
 	std::string                 name("Deployer");
     bool                        requireNameService = false;
     bool                        deploymentOnlyChecked = false;
 	int							minNumberCPU = 0;
-	po::variables_map           vm;
-	po::options_description     taoOptions("Additional options can also be passed to TAO");
+    po::variables_map           vm;
+	po::options_description     taoOptions("Additional options after a '--' are passed through to TAO");
 	// we don't actually list any options for TAO ...
 
 	po::options_description     otherOptions;
 
 #ifdef  ORO_BUILD_RTALLOC
-    OCL::memorySize         rtallocMemorySize   = ORO_DEFAULT_RTALLOC_SIZE;
-	po::options_description rtallocOptions      = OCL::deployerRtallocOptions(rtallocMemorySize);
+    OCL::memorySize             rtallocMemorySize   = ORO_DEFAULT_RTALLOC_SIZE;
+	po::options_description     rtallocOptions      = OCL::deployerRtallocOptions(rtallocMemorySize);
 	otherOptions.add(rtallocOptions);
     OCL::TLSFMemoryPool     memoryPool;
 #endif
@@ -88,23 +88,23 @@ int main(int argc, char** argv)
     // as last set of options
     otherOptions.add(taoOptions);
 
-    // were we given TAO options? ie find "--"
-    int     taoIndex    = 0;
+    // were we given non-deployer options? ie find "--"
+    int     optIndex    = 0;
     bool    found       = false;
 
-    while(!found && taoIndex<argc)
+    while(!found && optIndex<argc)
     {
-        found = (0 == strcmp("--", argv[taoIndex]));
-        if(!found) taoIndex++;
+        found = (0 == strcmp("--", argv[optIndex]));
+        if(!found) optIndex++;
     }
 
     if (found) {
-        argv[taoIndex] = argv[0];
+        argv[optIndex] = argv[0];
     }
 
-    // if TAO options not found then process all command line options,
+    // if extra options not found then process all command line options,
     // otherwise process all options up to but not including "--"
-	int rc = OCL::deployerParseCmdLine(!found ? argc : taoIndex, argv,
+    int rc = OCL::deployerParseCmdLine(!found ? argc : optIndex, argv,
                                        siteFile, scriptFiles, name, requireNameService, deploymentOnlyChecked,
 									   minNumberCPU,
                                        vm, &otherOptions);
@@ -140,35 +140,33 @@ int main(int argc, char** argv)
         OCL::logging::Category::createOCLCategory);
 #endif
 
-
     /******************** WARNING ***********************
      *   NO log(...) statements before __os_init() !!!!! 
      ***************************************************/
 
     // start Orocos _AFTER_ setting up log4cpp
-	if (0 == __os_init(argc - taoIndex, &argv[taoIndex]))
+	if (0 == __os_init(argc - optIndex, &argv[optIndex]))
     {
 #ifdef  ORO_BUILD_LOGGING
         log(Info) << "OCL factory set for real-time logging" << endlog();
 #endif
         rc = -1;     // prove otherwise
-        // scope to force dc destruction prior to memory free
         try {
             // if TAO options not found then have TAO process just the program name,
             // otherwise TAO processes the program name plus all options (potentially
             // none) after "--"
-            TaskContextServer::InitOrb( argc - taoIndex, &argv[taoIndex] );
+            TaskContextServer::InitOrb( argc - optIndex, &argv[optIndex] );
 
             // scope to force dc destruction prior to memory free and Orb shutdown
             {
                 OCL::CorbaDeploymentComponent dc( name, siteFile );
 
                 if (0 == TaskContextServer::Create( &dc, true, requireNameService ))
-                    {
-                        return -1;
-                    }
+                {
+                    return -1;
+                }
 
-                // The orb thread accepts incomming CORBA calls.
+                // The orb thread accepts incoming CORBA calls.
                 TaskContextServer::ThreadOrb();
 
                 /* Only start the scripts after the Orb was created. Processing of
@@ -205,9 +203,9 @@ int main(int argc, char** argv)
                             continue;
                         }
 
-                        if ( (*iter).rfind(".ops",string::npos) == (*iter).length() - 4 ||
-                             (*iter).rfind(".osd",string::npos) == (*iter).length() - 4 ||
-                             (*iter).rfind(".lua",string::npos) == (*iter).length() - 4) {
+                        if ( (*iter).rfind(".ops", std::string::npos) == (*iter).length() - 4 ||
+                             (*iter).rfind(".osd", std::string::npos) == (*iter).length() - 4 ||
+                             (*iter).rfind(".lua", std::string::npos) == (*iter).length() - 4) {
                             result = dc.runScript( (*iter) );
                             continue;
                         }
@@ -226,15 +224,14 @@ int main(int argc, char** argv)
                         dc.waitForInterrupt();
                     }
 
-                     // do it while CORBA is still up in case need to do anything remote.
-                     dc.shutdownDeployment();
+                    // do it while CORBA is still up in case need to do anything remote.
+                    dc.shutdownDeployment();
                 }
             }
 
             TaskContextServer::ShutdownOrb();
 
             TaskContextServer::DestroyOrb();
-
 
         } catch( CORBA::Exception &e ) {
             log(Error) << argv[0] <<" ORO_main : CORBA exception raised!" << Logger::nl;
@@ -244,14 +241,14 @@ int main(int argc, char** argv)
             log(Error) << "Uncaught exception." << endlog();
         }
 
-		// shutdown Orocos
-		__os_exit();
-	}
-	else
-	{
-		std::cerr << "Unable to start Orocos" << std::endl;
+        // shutdown Orocos
+        __os_exit();
+    }
+    else
+    {
+        std::cerr << "Unable to start Orocos" << std::endl;
         rc = -1;
-	}
+    }
 
 #ifdef  ORO_BUILD_LOGGING
     log4cpp::HierarchyMaintainer::getDefaultMaintainer().shutdown();

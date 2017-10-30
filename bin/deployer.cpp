@@ -62,7 +62,7 @@ namespace po = boost::program_options;
 int main(int argc, char** argv)
 {
 	std::string                 siteFile;      // "" means use default in DeploymentComponent.cpp
-    std::vector<std::string>    scriptFiles;
+	std::vector<std::string>    scriptFiles;
 	std::string                 name("Deployer");
     bool                        requireNameService = false;         // not used
     bool                        deploymentOnlyChecked = false;
@@ -186,12 +186,13 @@ int main(int argc, char** argv)
                         continue;
                     }
 
-                    if ( (*iter).rfind(".ops",std::string::npos) == (*iter).length() - 4 ||
-                         (*iter).rfind(".osd",std::string::npos) == (*iter).length() - 4 ||
-                         (*iter).rfind(".lua",std::string::npos) == (*iter).length() - 4) {
+                    if ( (*iter).rfind(".ops", std::string::npos) == (*iter).length() - 4 ||
+                         (*iter).rfind(".osd", std::string::npos) == (*iter).length() - 4 ||
+                         (*iter).rfind(".lua", std::string::npos) == (*iter).length() - 4) {
                         result = dc.runScript( (*iter) ) && result;
                         continue;
                     }
+
                     log(Error) << "Unknown extension of file: '"<< (*iter) <<"'. Must be xml, cpf for XML files or, ops, osd or lua for script files."<<endlog();
                 }
             }
@@ -212,14 +213,14 @@ int main(int argc, char** argv)
 #endif
         }
 
-		// shutdown Orocos
-		__os_exit();
-	}
-	else
-	{
-		std::cerr << "Unable to start Orocos" << std::endl;
+        // shutdown Orocos
+        __os_exit();
+    }
+    else
+    {
+        std::cerr << "Unable to start Orocos" << std::endl;
         rc = -1;
-	}
+    }
 
 #ifdef  ORO_BUILD_LOGGING
     log4cpp::HierarchyMaintainer::getDefaultMaintainer().shutdown();
