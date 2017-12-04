@@ -1439,7 +1439,8 @@ namespace OCL
 
             // do not configure when not stopped.
             if ( peer->getTaskState() > Stopped) {
-                log(Warning) << "Component "<< peer->getName()<< " doesn't need to be configured (already Running)." <<endlog();
+                if (!compmap[comp.getName()].proxy)
+                    log(Warning) << "Component "<< peer->getName()<< " doesn't need to be configured (already Running)." <<endlog();
                 continue;
             }
 
