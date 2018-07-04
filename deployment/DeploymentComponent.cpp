@@ -1364,7 +1364,7 @@ namespace OCL
                 // two ports later on, so we skip this connection for now.
                 if (skipUnconnected)
                 {
-                    log(Info) << "Skipping connection with name " << connection_name << " with only one Port " << portname << " from " << owner << endlog();
+                    log(Info) << "Skipping connection with name "<<connection_name<<" with only one Port "<<portname<<" from "<< owner << endlog();
                 }
                 else if ( connection->ports.front()->createStream( connection->policy ) == false) {
                     log(Warning) << "Creating stream with name "<<connection_name<<" with Port "<<portname<<" from "<< owner << " failed."<< endlog();
@@ -1376,7 +1376,7 @@ namespace OCL
             // first find all write ports.
             base::PortInterface* writer = 0;
             ConnectionData::Ports::iterator p = connection->ports.begin();
-
+            
             // If one of the ports is connected, use that one as writer to connect to.
             vector<OutputPortInterface*> writers;
             while (p !=connection->ports.end() ) {
@@ -1384,7 +1384,7 @@ namespace OCL
                     if ( writer ) {
                         log(Info) << "Forming multi-output connections with additional OutputPort " << (*p)->getName() << "."<<endlog();
                     } else
-                        writer = *p;
+                    writer = *p;
                     writers.push_back( out );
                     std::string owner = it->second.owners[p - it->second.ports.begin()]->getName();
                     log(Info) << "Component "<< owner << "'s OutputPort "<< writer->getName()<< " will write topic "<<it->first<< endlog();
@@ -1977,7 +1977,7 @@ namespace OCL
                 // Finally, delete the activity before the TC !
                 delete it->act;
                 it->act = 0;
-                ComponentLoader::Instance()->unloadComponent( it->instance, name );
+                ComponentLoader::Instance()->unloadComponent( it->instance );
                 it->instance = 0;
                 log(Info) << "Disconnected and destroyed "<< name <<endlog();
             } else {
