@@ -431,9 +431,8 @@ void deployerDumpTLSF()
     // format now as "YYYYMMDDTHHMMSS.ffffff"
     const bpt::ptime now = bpt::microsec_clock::local_time();
     static const size_t START = strlen("YYYYMMDDTHHMMSS,");
-    std::string now_s = bpt::to_iso_string(now);    // YYYYMMDDTHHMMSS,fffffffff
+    std::string now_s = bpt::to_iso_string(now);    // YYYYMMDDTHHMMSS,ffffff
     now_s.replace(START-1, 1, ".");                 // replace "," with "."
-    now_s.erase(now_s.size()-3, 3);                 // from nanosec to microsec
 
     // TLSF debug
     FILE* ff = fopen("deployer_tlsf_dump.txt", "a");     // write+append
