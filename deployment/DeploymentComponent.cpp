@@ -38,6 +38,7 @@
 #include <rtt/scripting/Scripting.hpp>
 #include <rtt/ConnPolicy.hpp>
 #include <rtt/plugin/PluginLoader.hpp>
+#include <rtt/types/GlobalsRepository.hpp>
 
 # if defined(_POSIX_VERSION)
 #   define USE_SIGNALS 1
@@ -735,6 +736,10 @@ namespace OCL
         int thisGroup = nextGroup;
         ++nextGroup;    // whether succeed or fail
         if ( this->loadComponentsInGroup(configurationfile, thisGroup) ) {
+            if ( root.empty() ) {
+                log(Warning) <<"No components loaded by DeploymentComponent from "<< configurationfile <<endlog();
+                return true;
+            }
             if (this->configureComponentsGroup(thisGroup) ) {
                 if (doStart) {
                     if ( this->startComponentsGroup(thisGroup) ) {
@@ -931,6 +936,34 @@ namespace OCL
                                 valid = false;
                             continue;
                         }
+                        if ( (*it)->getName() == "GlobalsRepository" ) {
+                            RTT::Property<RTT::PropertyBag> global = *it;
+                            if ( !global.ready() ) {
+                                log(Error)<< "Found 'GlobalsRepository' tag, but it is not a complex xml type"<<endlog();
+                                valid = false;
+                                continue;
+                            }
+                            // Check for default Global properties to be set.
+                            for (RTT::PropertyBag::const_iterator pf = global.rvalue().begin(); pf != global.rvalue().end(); ++pf) {
+                                if ( (*pf)->getName() == "Properties" ) {
+                                    RTT::Property<RTT::PropertyBag> props = *pf;
+                                    if ( !props.ready() ) {
+                                        log(Error)<< "Found 'Properties' in 'GlobalsRepository' tag, but it is not of type PropertyBag"<<endlog();
+                                        valid = false;
+                                        continue;
+                                    }
+                                    bool ret = updateProperties( *RTT::types::GlobalsRepository::Instance()->properties(), props );
+                                    if (!ret) {
+                                        log(Error) << "Failed to configure global properties from configuration file."<<endlog();
+                                        valid = false;
+                                    } else {
+                                        log(Info) << "Configured global properties from configuration file."<<endlog();
+                                    }
+                                }
+                            }
+                            continue;
+                        }
+
                         // Check if it is a propertybag.
                         RTT::Property<RTT::PropertyBag> comp = *it;
                         if ( !comp.ready() ) {
@@ -1097,7 +1130,7 @@ namespace OCL
 
                         // Check if we know or are this component.
                         RTT::TaskContext* c = 0;
-                        if ( (*it)->getName() == this->getName() )
+                        if ( (*it)->getName() == "this" || (*it)->getName() == this->getName() )
                             c = this;
                         else
                             c = this->getPeer( (*it)->getName() );
@@ -1322,7 +1355,7 @@ namespace OCL
                 connection->policy.name_id = connection_name;
             }
 
-            if ( connection->ports.size() == 1 ){
+            if ( connection->ports.size() == 1) {
                 string owner = connection->owners[0]->getName();
                 string portname = connection->ports.front()->getName();
                 string porttype = dynamic_cast<InputPortInterface*>(connection->ports.front() ) ? "InputPort" : "OutputPort";
@@ -1393,7 +1426,7 @@ namespace OCL
         }
         return valid;
     }
-    
+
     bool DeploymentComponent::configureComponents()
     {
         RTT::Logger::In in("configureComponents");
@@ -2034,7 +2067,7 @@ namespace OCL
         }
         return false;
     }
-	
+
     bool DeploymentComponent::setActivityOnCPU(const std::string& comp_name,
                                           double period, int priority,
 					       int scheduler, unsigned int cpu_nr)
@@ -2127,7 +2160,7 @@ namespace OCL
         // stores it in compmap[comp_name].act
         RTT::TaskContext* peer = 0;
         base::ActivityInterface* master_act = 0;
-        if ( comp_name == this->getName() )
+        if ( comp_name == "this" || comp_name == this->getName() )
             peer = this;
         else
             if ( compmap.count(comp_name) )
@@ -2139,7 +2172,7 @@ namespace OCL
             return false;
         }
         if ( !master_name.empty() ) {
-            if ( master_name == this->getName() )
+            if ( master_name == "this" || master_name == this->getName() )
 	        master_act = this->engine()->getActivity();
             else
                 if ( compmap.count(master_name) && compmap[master_name].act )
@@ -2242,7 +2275,7 @@ namespace OCL
     {
         RTT::Logger::In in("DeploymentComponent");
         RTT::TaskContext* c;
-        if ( name == this->getName() )
+        if ( name == "this" || name == this->getName() )
             c = this;
         else
             c = this->getPeer(name);
@@ -2516,7 +2549,7 @@ namespace OCL
                     log(Debug) << "Waiting for deployment shutdown to complete ..." << endlog();
                     int waited = 0;
                     while ( ( (has_operation && RTT::SendNotReady == handle.collectIfDone() ) ||
-                              (has_program && peer->getProvider<Scripting>("scripting")->isProgramRunning(NAME)) ) 
+                              (has_program && peer->getProvider<Scripting>("scripting")->isProgramRunning(NAME)) )
                             && (waited < totalWait) )
                     {
                         (void)rtos_nanosleep(&ts, NULL);

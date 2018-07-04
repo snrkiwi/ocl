@@ -30,7 +30,7 @@ IF ( BUILD_TASKBROWSER AND BUILD_DEPLOYMENT)
 
     orocos_executable( deployer deployer.cpp deployer-funcs.cpp )
     target_link_libraries( deployer ${EXTRA_DEPS} )
-    target_link_libraries( deployer ${OROCOS-RTT_LIBRARIES} orocos-ocl-taskbrowser orocos-ocl-deployment ${Boost_PROGRAM_OPTIONS_LIBRARY} ${EXTRA_LIBRARIES})
+    target_link_libraries( deployer ${OROCOS-RTT_LIBRARIES} orocos-ocl-taskbrowser orocos-ocl-deployment ${Boost_PROGRAM_OPTIONS_LIBRARY} ${Boost_DATE_TIME_LIBRARY} ${EXTRA_LIBRARIES})
     list(APPEND UTILITY_SCRIPTS deployer)
 
 ENDIF ( BUILD_TASKBROWSER AND BUILD_DEPLOYMENT)
@@ -38,7 +38,7 @@ IF ( BUILD_DEPLOYMENT)
 
     orocos_executable( rttscript deployer.cpp deployer-funcs.cpp )
     target_link_libraries( rttscript ${EXTRA_DEPS} )
-    target_link_libraries( rttscript ${OROCOS-RTT_LIBRARIES} orocos-ocl-deployment ${Boost_PROGRAM_OPTIONS_LIBRARY} ${EXTRA_LIBRARIES})
+    target_link_libraries( rttscript ${OROCOS-RTT_LIBRARIES} orocos-ocl-deployment ${Boost_PROGRAM_OPTIONS_LIBRARY} ${Boost_DATE_TIME_LIBRARY} ${EXTRA_LIBRARIES})
     set_target_properties( rttscript PROPERTIES COMPILE_DEFINITIONS RTT_SCRIPT_PROGRAM )
     list(APPEND UTILITY_SCRIPTS rttscript)
 
@@ -59,12 +59,12 @@ IF ( BUILD_DEPLOYMENT AND OROCOS-RTT_CORBA_FOUND)
 
     orocos_executable( cdeployer cdeployer.cpp deployer-funcs.cpp )
     target_link_libraries( cdeployer ${EXTRA_DEPS} )
-    target_link_libraries( cdeployer ${OROCOS-RTT_LIBRARIES} ${OROCOS-RTT_CORBA_LIBRARIES} orocos-ocl-deployment-corba ${Boost_PROGRAM_OPTIONS_LIBRARY} ${EXTRA_LIBRARIES})
+    target_link_libraries( cdeployer ${OROCOS-RTT_LIBRARIES} ${OROCOS-RTT_CORBA_LIBRARIES} orocos-ocl-deployment-corba ${Boost_PROGRAM_OPTIONS_LIBRARY} ${Boost_DATE_TIME_LIBRARY} ${EXTRA_LIBRARIES})
     list(APPEND UTILITY_SCRIPTS cdeployer)
 
     orocos_executable( deployer-corba deployer-corba.cpp deployer-funcs.cpp )
     target_link_libraries( deployer-corba ${EXTRA_DEPS} )
-    target_link_libraries( deployer-corba ${OROCOS-RTT_LIBRARIES} ${OROCOS-RTT_CORBA_LIBRARIES} orocos-ocl-deployment-corba orocos-ocl-taskbrowser ${Boost_PROGRAM_OPTIONS_LIBRARY} ${EXTRA_LIBRARIES})
+    target_link_libraries( deployer-corba ${OROCOS-RTT_LIBRARIES} ${OROCOS-RTT_CORBA_LIBRARIES} orocos-ocl-deployment-corba orocos-ocl-taskbrowser ${Boost_PROGRAM_OPTIONS_LIBRARY} ${Boost_DATE_TIME_LIBRARY} ${EXTRA_LIBRARIES})
     list(APPEND UTILITY_SCRIPTS deployer-corba)
 
 ENDIF ( BUILD_DEPLOYMENT AND OROCOS-RTT_CORBA_FOUND)
